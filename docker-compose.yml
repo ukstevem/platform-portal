@@ -1,0 +1,66 @@
+services:
+  gateway:
+    image: nginx:1.27-alpine
+    container_name: platform_gateway
+    ports:
+      - "3000:80"
+    volumes:
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - portal
+      - jobcards
+      - documents
+
+  portal:
+    build:
+      context: .
+      dockerfile: docker/node/Dockerfile.dev
+    container_name: platform_portal
+    working_dir: /repo
+    env_file: .env
+    command:
+      ["sh", "-lc", "corepack enable && corepack prepare pnpm@9.15.0 --activate && (test -f apps/portal/node_modules/.bin/next || pnpm -C apps/portal install) && pnpm -C apps/portal dev --hostname 0.0.0.0 --port 3000"]
+    volumes:
+      - ./:/repo
+      - portal_node_modules:/repo/apps/portal/node_modules
+      - pnpm_store:/repo/.pnpm-store
+
+  jobcards:
+    build:
+      context: .
+      dockerfile: docker/node/Dockerfile.dev
+    container_name: platform_jobcards
+    working_dir: /repo
+    env_file: .env
+    command:
+      ["sh", "-lc", "corepack enable && corepack prepare pnpm@9.15.0 --activate && (test -f apps/jobcards/node_modules/.bin/next || pnpm -C apps/jobcards install) && pnpm -C apps/jobcards dev --hostname 0.0.0.0 --port 3001"]
+    volumes:
+      - ./:/repo
+      - jobcards_node_modules:/repo/apps/jobcards/node_modules
+      - pnpm_store:/repo/.pnpm-store
+
+
+  documents:
+    build:
+      context: .
+      dockerfile: docker/node/Dockerfile.dev
+    container_name: platform_documents
+    working_dir: /repo
+    env_file: .env
+    environment:
+      DOC_NAS_ROOT: /data/input
+    command:
+      ["sh", "-lc", "corepack enable && corepack prepare pnpm@9.15.0 --activate && (test -f apps/documents/node_modules/.bin/next || pnpm -C apps/documents install) && pnpm -C apps/documents dev --hostname 0.0.0.0 --port 3002"]
+    volumes:
+      - ./:/repo
+      - documents_node_modules:/repo/apps/documents/node_modules
+      - pnpm_store:/repo/.pnpm-store
+      - ${HOST_DOC_ROOT}:/data/input:ro
+
+
+volumes:
+  portal_node_modules:
+  jobcards_node_modules:
+  documents_node_modules:
+  pnpm_store:
+

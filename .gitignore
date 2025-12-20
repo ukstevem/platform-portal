@@ -1,0 +1,10 @@
+.env
+.env.*
+node_modules/
+.pnpm-store/
+.next/
+dist/
+out/
+*.log
+.DS_Store
+Thumbs.db

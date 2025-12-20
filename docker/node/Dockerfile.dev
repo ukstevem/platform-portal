@@ -1,0 +1,4 @@
+FROM node:20-alpine
+RUN corepack enable
+WORKDIR /repo
+ENV NODE_ENV=development
