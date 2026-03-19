@@ -7,6 +7,9 @@
   "dependencies": {
     "@platform/supabase": "workspace:*"
   },
+  "devDependencies": {
+    "@types/react": "*"
+  },
   "peerDependencies": {
     "next": ">=16",
     "react": ">=19"

@@ -4,6 +4,9 @@
   "private": true,
   "main": "./index.ts",
   "types": "./index.ts",
+  "devDependencies": {
+    "@types/react": "*"
+  },
   "peerDependencies": {
     "react": ">=19",
     "next": ">=16"
