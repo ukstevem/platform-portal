@@ -1,0 +1,47 @@
+services:
+  gateway:
+    image: ghcr.io/ukstevem/platform-portal/gateway:latest
+    container_name: platform_gateway
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_PORT:-3000}:80"
+    depends_on:
+      - portal
+      - jobcards
+      - documents
+      - timesheets
+
+  portal:
+    image: ghcr.io/ukstevem/platform-portal/portal:latest
+    container_name: platform_portal
+    restart: unless-stopped
+    environment:
+      - APP_NAME=portal
+      - PORT=3000
+
+  jobcards:
+    image: ghcr.io/ukstevem/platform-portal/jobcards:latest
+    container_name: platform_jobcards
+    restart: unless-stopped
+    environment:
+      - APP_NAME=jobcards
+      - PORT=3001
+
+  documents:
+    image: ghcr.io/ukstevem/platform-portal/documents:latest
+    container_name: platform_documents
+    restart: unless-stopped
+    environment:
+      - APP_NAME=documents
+      - PORT=3002
+      - DOC_NAS_ROOT=/data/input
+    volumes:
+      - ${HOST_DOC_ROOT:-/tmp}:/data/input:ro
+
+  timesheets:
+    image: ghcr.io/ukstevem/platform-portal/timesheets:latest
+    container_name: platform_timesheets
+    restart: unless-stopped
+    environment:
+      - APP_NAME=timesheets
+      - PORT=3003
