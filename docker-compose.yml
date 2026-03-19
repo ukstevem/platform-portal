@@ -10,6 +10,7 @@ services:
       - portal
       - jobcards
       - documents
+      - timesheets
 
   portal:
     build:
@@ -19,11 +20,12 @@ services:
     working_dir: /repo
     env_file: .env
     command:
-      ["sh", "-lc", "corepack enable && corepack prepare pnpm@9.15.0 --activate && (test -f apps/portal/node_modules/.bin/next || pnpm -C apps/portal install) && pnpm -C apps/portal dev --hostname 0.0.0.0 --port 3000"]
+      ["sh", "-lc", "corepack enable && corepack prepare pnpm@9.15.0 --activate && pnpm install && pnpm -C apps/portal dev --hostname 0.0.0.0 --port 3000"]
     volumes:
       - ./:/repo
+      - portal_pnpm_store:/repo/.pnpm-store
+      - portal_root_nm:/repo/node_modules
       - portal_node_modules:/repo/apps/portal/node_modules
-      - pnpm_store:/repo/.pnpm-store
 
   jobcards:
     build:
@@ -33,12 +35,12 @@ services:
     working_dir: /repo
     env_file: .env
     command:
-      ["sh", "-lc", "corepack enable && corepack prepare pnpm@9.15.0 --activate && (test -f apps/jobcards/node_modules/.bin/next || pnpm -C apps/jobcards install) && pnpm -C apps/jobcards dev --hostname 0.0.0.0 --port 3001"]
+      ["sh", "-lc", "corepack enable && corepack prepare pnpm@9.15.0 --activate && pnpm install && pnpm -C apps/jobcards dev --hostname 0.0.0.0 --port 3001"]
     volumes:
       - ./:/repo
+      - jobcards_pnpm_store:/repo/.pnpm-store
+      - jobcards_root_nm:/repo/node_modules
       - jobcards_node_modules:/repo/apps/jobcards/node_modules
-      - pnpm_store:/repo/.pnpm-store
-
 
   documents:
     build:
@@ -50,17 +52,39 @@ services:
     environment:
       DOC_NAS_ROOT: /data/input
     command:
-      ["sh", "-lc", "corepack enable && corepack prepare pnpm@9.15.0 --activate && (test -f apps/documents/node_modules/.bin/next || pnpm -C apps/documents install) && pnpm -C apps/documents dev --hostname 0.0.0.0 --port 3002"]
+      ["sh", "-lc", "corepack enable && corepack prepare pnpm@9.15.0 --activate && pnpm install && pnpm -C apps/documents dev --hostname 0.0.0.0 --port 3002"]
     volumes:
       - ./:/repo
+      - documents_pnpm_store:/repo/.pnpm-store
+      - documents_root_nm:/repo/node_modules
       - documents_node_modules:/repo/apps/documents/node_modules
-      - pnpm_store:/repo/.pnpm-store
-      - ${HOST_DOC_ROOT}:/data/input:ro
+      - ${HOST_DOC_ROOT}:/data/input
 
+  timesheets:
+    build:
+      context: .
+      dockerfile: docker/node/Dockerfile.dev
+    container_name: platform_timesheets
+    working_dir: /repo
+    env_file: .env
+    command:
+      ["sh", "-lc", "corepack enable && corepack prepare pnpm@9.15.0 --activate && pnpm install && pnpm -C apps/timesheets dev --hostname 0.0.0.0 --port 3003"]
+    volumes:
+      - ./:/repo
+      - timesheets_pnpm_store:/repo/.pnpm-store
+      - timesheets_root_nm:/repo/node_modules
+      - timesheets_node_modules:/repo/apps/timesheets/node_modules
 
 volumes:
+  portal_pnpm_store:
+  portal_root_nm:
   portal_node_modules:
+  jobcards_pnpm_store:
+  jobcards_root_nm:
   jobcards_node_modules:
+  documents_pnpm_store:
+  documents_root_nm:
   documents_node_modules:
-  pnpm_store:
-
+  timesheets_pnpm_store:
+  timesheets_root_nm:
+  timesheets_node_modules:

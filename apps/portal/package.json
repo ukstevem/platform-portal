@@ -11,7 +11,10 @@
   "dependencies": {
     "next": "16.1.0",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "@platform/supabase": "workspace:*",
+    "@platform/auth": "workspace:*",
+    "@platform/ui": "workspace:*"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

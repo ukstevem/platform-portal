@@ -1,0 +1,14 @@
+{
+  "name": "@platform/auth",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./index.ts",
+  "types": "./index.ts",
+  "dependencies": {
+    "@platform/supabase": "workspace:*"
+  },
+  "peerDependencies": {
+    "next": ">=16",
+    "react": ">=19"
+  }
+}
