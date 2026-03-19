@@ -50,4 +50,4 @@ COPY --from=builder /repo/node_modules/ ./node_modules/
 
 EXPOSE ${APP_PORT}
 
-CMD ["sh", "-c", "pnpm -C apps/${APP_NAME} start -- --hostname 0.0.0.0 --port ${PORT}"]
+CMD ["sh", "-c", "cd apps/${APP_NAME} && npx next start --hostname 0.0.0.0 --port ${PORT}"]
