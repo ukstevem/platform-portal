@@ -202,7 +202,7 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
     const monFriISOs = weekISOs.slice(0, 5);
     const weekendISOs = weekISOs.slice(5); // Sat, Sun
 
-    const nonWork = new Set(["SICK-01", "HOLIDAY-01"]);
+    const nonWork = new Set(["SICK-01"]);
     const monFriTotal = monFriISOs.reduce((sum, iso) =>
       sum + rows.reduce((s, row) => {
         if (nonWork.has(row.project_item)) return s;
@@ -331,7 +331,7 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
   // Once 40h hit: remaining hours that day + subsequent days = OT
   // Saturday: always OT if threshold met (first 5h x1.5, beyond x2.0)
   const OT_HURDLE = 40;
-  const NON_WORK_ITEMS = new Set(["SICK-01", "HOLIDAY-01"]);
+  const NON_WORK_ITEMS = new Set(["SICK-01"]);
 
   // Full day totals (all items, for display)
   const dayTotals = weekISOs.map((iso) =>
