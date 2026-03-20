@@ -25,4 +25,6 @@ export type GridRow = {
   line_desc?: string;
   /** hours indexed by ISO date string (YYYY-MM-DD) */
   hours: Record<string, number>;
+  /** overtime flags indexed by ISO date string */
+  overtime: Record<string, boolean>;
 };

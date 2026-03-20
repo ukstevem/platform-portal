@@ -81,7 +81,7 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
 
       const { data: entries } = await supabase
         .from("timesheet_entries")
-        .select("project_item, work_date, hours")
+        .select("project_item, work_date, hours, is_overtime")
         .eq("employee_id", employee.id)
         .gte("work_date", weekISOs[0])
         .lte("work_date", weekISOs[6]);
@@ -89,11 +89,14 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
       if (cancelled) return;
 
       const rowMap = new Map<string, Record<string, number>>();
+      const otMap = new Map<string, Record<string, boolean>>();
       for (const e of entries ?? []) {
         if (!rowMap.has(e.project_item)) {
           rowMap.set(e.project_item, {});
+          otMap.set(e.project_item, {});
         }
         rowMap.get(e.project_item)![e.work_date] = Number(e.hours);
+        otMap.get(e.project_item)![e.work_date] = !!e.is_overtime;
       }
 
       // If no rows this week, prepopulate project list from previous week
@@ -132,10 +135,11 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
       const projectRows: GridRow[] = [];
       const persistentRows: GridRow[] = [];
       for (const [project_item, hours] of rowMap) {
+        const overtime = otMap.get(project_item) ?? {};
         if (persistentKeys.has(project_item)) {
-          persistentRows.push({ project_item, hours });
+          persistentRows.push({ project_item, hours, overtime });
         } else {
-          projectRows.push({ project_item, hours });
+          projectRows.push({ project_item, hours, overtime });
         }
       }
       const gridRows: GridRow[] = [...projectRows, ...persistentRows];
@@ -193,6 +197,51 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
     [employee.id, user?.id]
   );
 
+  // Auto-flag Sat/Sun as OT when Mon-Fri >= 40h
+  const autoFlagWeekendOT = useCallback(() => {
+    const monFriISOs = weekISOs.slice(0, 5);
+    const weekendISOs = weekISOs.slice(5); // Sat, Sun
+
+    const nonWork = new Set(["SICK-01", "HOLIDAY-01"]);
+    const monFriTotal = monFriISOs.reduce((sum, iso) =>
+      sum + rows.reduce((s, row) => {
+        if (nonWork.has(row.project_item)) return s;
+        return s + (row.hours[iso] ?? 0);
+      }, 0), 0
+    );
+    const shouldBeOT = monFriTotal >= 40;
+
+    let changed = false;
+    const updated = rows.map((row) => {
+      let rowChanged = false;
+      const newOT = { ...row.overtime };
+      for (const iso of weekendISOs) {
+        const hasHours = (row.hours[iso] ?? 0) > 0;
+        if (hasHours && newOT[iso] !== shouldBeOT) {
+          newOT[iso] = shouldBeOT;
+          rowChanged = true;
+          // Save to DB
+          supabase
+            .from("timesheet_entries")
+            .update({ is_overtime: shouldBeOT })
+            .eq("employee_id", employee.id)
+            .eq("project_item", row.project_item)
+            .eq("work_date", iso)
+            .then(() => {});
+        }
+      }
+      if (rowChanged) { changed = true; return { ...row, overtime: newOT }; }
+      return row;
+    });
+
+    if (changed) setRows(updated);
+  }, [rows, weekISOs, employee.id]);
+
+  // Run auto-flag after any hours change settles
+  useEffect(() => {
+    autoFlagWeekendOT();
+  }, [rows.map(r => weekISOs.map(iso => r.hours[iso] ?? 0).join(",")).join("|")]);
+
   const handleHoursChange = (
     rowIdx: number,
     dateISO: string,
@@ -217,6 +266,31 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
     saveCell(row.project_item, dateISO, hours);
   };
 
+  const toggleOvertime = (rowIdx: number, dateISO: string) => {
+    const row = rows[rowIdx];
+    const hours = row.hours[dateISO] ?? 0;
+    if (hours === 0) return; // Can't flag empty cells
+
+    const newOT = !row.overtime[dateISO];
+    setRows((prev) => {
+      const updated = [...prev];
+      updated[rowIdx] = {
+        ...updated[rowIdx],
+        overtime: { ...updated[rowIdx].overtime, [dateISO]: newOT },
+      };
+      return updated;
+    });
+
+    // Save to Supabase
+    supabase
+      .from("timesheet_entries")
+      .update({ is_overtime: newOT })
+      .eq("employee_id", employee.id)
+      .eq("project_item", row.project_item)
+      .eq("work_date", dateISO)
+      .then(() => {});
+  };
+
   const sortRows = (input: GridRow[]): GridRow[] => {
     const persistentKeys = new Set(PERSISTENT_ITEMS.map((p) => p.project_item));
     const projectRows = input.filter((r) => !persistentKeys.has(r.project_item));
@@ -227,7 +301,7 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
 
   const addProject = (project_item: string) => {
     if (rows.some((r) => r.project_item === project_item)) return;
-    setRows((prev) => sortRows([...prev, { project_item, hours: {} }]));
+    setRows((prev) => sortRows([...prev, { project_item, hours: {}, overtime: {} }]));
     setShowProjectPicker(false);
     setProjectSearch("");
   };
@@ -252,40 +326,77 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
     setRows((prev) => prev.filter((_, i) => i !== rowIdx));
   };
 
-  // Calculate totals + overtime (40h hurdle)
+  // Calculate totals + overtime
+  // Basic = first 40h cumulative across Mon-Fri (excluding sick & holiday)
+  // Once 40h hit: remaining hours that day + subsequent days = OT
+  // Saturday: always OT if threshold met (first 5h x1.5, beyond x2.0)
   const OT_HURDLE = 40;
+  const NON_WORK_ITEMS = new Set(["SICK-01", "HOLIDAY-01"]);
+
+  // Full day totals (all items, for display)
   const dayTotals = weekISOs.map((iso) =>
     rows.reduce((sum, row) => sum + (row.hours[iso] ?? 0), 0)
   );
   const grandTotal = dayTotals.reduce((a, b) => a + b, 0);
-  const straightTime = Math.min(grandTotal, OT_HURDLE);
-  const overtime = Math.max(grandTotal - OT_HURDLE, 0);
 
-  // Accumulate straight/OT per day (fill straight first, then OT)
+  // Working day totals (excluding sick & holiday, for OT threshold)
+  const dayWorkTotals = weekISOs.map((iso) =>
+    rows.reduce((sum, row) => {
+      if (NON_WORK_ITEMS.has(row.project_item)) return sum;
+      return sum + (row.hours[iso] ?? 0);
+    }, 0)
+  );
+
+  // Mon-Fri working hours (excludes sick/holiday)
+  const monFriWorkTotal = dayWorkTotals.slice(0, 5).reduce((a, b) => a + b, 0);
+  const saturdayWorkTotal = dayWorkTotals[5] ?? 0;
+  const thresholdMet = monFriWorkTotal >= OT_HURDLE;
+
   const { dayStraight, dayOvertime } = (() => {
-    let running = 0;
     const st: number[] = [];
     const ot: number[] = [];
-    for (const dt of dayTotals) {
-      const prevRunning = running;
+
+    // Mon-Fri (indices 0-4): cumulative working hours, basic until 40h, then OT
+    let running = 0;
+    for (let i = 0; i < 5; i++) {
+      const dt = dayWorkTotals[i];
+      const prev = running;
       running += dt;
-      if (prevRunning >= OT_HURDLE) {
-        // Already past hurdle — all OT
-        st.push(0);
-        ot.push(dt);
+      if (prev >= OT_HURDLE) {
+        st.push(0); ot.push(dt);
       } else if (running > OT_HURDLE) {
-        // Crosses hurdle this day
-        const straightPart = OT_HURDLE - prevRunning;
-        st.push(straightPart);
-        ot.push(dt - straightPart);
+        st.push(OT_HURDLE - prev); ot.push(running - OT_HURDLE);
       } else {
-        // All straight
-        st.push(dt);
-        ot.push(0);
+        st.push(dt); ot.push(0);
       }
     }
+
+    // Saturday (index 5): all OT if threshold met, otherwise basic
+    if (thresholdMet) {
+      st.push(0); ot.push(saturdayWorkTotal);
+    } else {
+      st.push(saturdayWorkTotal); ot.push(0);
+    }
+
+    // Sunday (index 6)
+    const sunWorkTotal = dayWorkTotals[6] ?? 0;
+    if (thresholdMet) {
+      st.push(0); ot.push(sunWorkTotal);
+    } else {
+      st.push(sunWorkTotal); ot.push(0);
+    }
+
     return { dayStraight: st, dayOvertime: ot };
   })();
+
+  const straightTime = dayStraight.reduce((a, b) => a + b, 0);
+  const overtime = dayOvertime.reduce((a, b) => a + b, 0);
+
+  // Check if OT exists but not all OT hours are flagged on entries
+  const totalFlaggedOT = rows.reduce((sum, row) => {
+    return sum + weekISOs.reduce((s, iso) => s + (row.overtime[iso] && (row.hours[iso] ?? 0) > 0 ? (row.hours[iso] ?? 0) : 0), 0);
+  }, 0);
+  const otNeedsFlagging = thresholdMet && overtime > 0 && totalFlaggedOT < overtime;
 
   const handleApprove = async () => {
     if (!user) return;
@@ -415,13 +526,18 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
         ) : (
           <div className="flex items-center gap-3">
             <span className="text-sm text-gray-500">Not yet approved</span>
+            {otNeedsFlagging && (
+              <span className="text-xs text-amber-600 font-medium">
+                — Define O/T job(s): {overtime}h overtime, {totalFlaggedOT}h flagged
+              </span>
+            )}
           </div>
         )}
         {!approval && (
           <button
             type="button"
             onClick={handleApprove}
-            disabled={approving || grandTotal === 0}
+            disabled={approving || grandTotal === 0 || otNeedsFlagging}
             className="rounded bg-green-600 px-4 py-1.5 text-sm text-white font-medium hover:bg-green-700 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {approving ? "Approving..." : "Approve Timesheet"}
@@ -462,23 +578,44 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
                       <div className="text-xs text-gray-500 truncate max-w-52">{desc}</div>
                     )}
                   </td>
-                  {weekISOs.map((iso) => (
-                    <td key={iso} className="border px-0 py-0">
-                      <input
-                        type="number"
-                        min="0"
-                        max="24"
-                        step="0.5"
-                        value={row.hours[iso] ?? ""}
-                        onChange={(e) =>
-                          handleHoursChange(rowIdx, iso, e.target.value)
-                        }
-                        onBlur={() => handleBlur(rowIdx, iso)}
-                        className="w-full h-full px-2 py-1.5 text-center text-sm border-0 outline-none focus:bg-blue-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        placeholder="–"
-                      />
-                    </td>
-                  ))}
+                  {weekISOs.map((iso) => {
+                    const isOT = row.overtime[iso];
+                    const hasHours = (row.hours[iso] ?? 0) > 0;
+                    return (
+                      <td
+                        key={iso}
+                        className={`border px-0 py-0 relative group/cell ${isOT ? "bg-amber-100" : ""}`}
+                      >
+                        <input
+                          type="number"
+                          min="0"
+                          max="24"
+                          step="0.5"
+                          value={row.hours[iso] ?? ""}
+                          onChange={(e) =>
+                            handleHoursChange(rowIdx, iso, e.target.value)
+                          }
+                          onBlur={() => handleBlur(rowIdx, iso)}
+                          className={`w-full h-full px-2 py-1.5 text-center text-sm border-0 outline-none focus:bg-blue-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${isOT ? "bg-amber-100 text-amber-800 font-medium" : ""}`}
+                          placeholder="–"
+                        />
+                        {hasHours && (
+                          <button
+                            type="button"
+                            onClick={() => toggleOvertime(rowIdx, iso)}
+                            className={`absolute right-0 top-0 bottom-0 w-5 flex items-center justify-center text-[8px] font-bold cursor-pointer transition-opacity ${
+                              isOT
+                                ? "bg-amber-500 text-white opacity-100"
+                                : "bg-gray-300 text-gray-600 opacity-0 group-hover/cell:opacity-100"
+                            }`}
+                            title={isOT ? "Remove overtime" : "Flag as overtime"}
+                          >
+                            OT
+                          </button>
+                        )}
+                      </td>
+                    );
+                  })}
                   <td className="border px-2 py-1 text-center font-medium">
                     {rowTotal > 0 ? rowTotal : ""}
                   </td>
@@ -515,7 +652,7 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
             {/* Straight time row */}
             <tr className="bg-gray-50 text-xs">
               <td className="border px-3 py-1.5 text-right text-gray-600">
-                Straight time (≤{OT_HURDLE}h)
+                Straight time (Mon–Fri ≤{OT_HURDLE}h)
               </td>
               {dayStraight.map((h, i) => (
                 <td key={i} className="border px-2 py-1.5 text-center text-gray-600">
@@ -531,7 +668,7 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
             {/* Overtime row */}
             <tr className={`text-xs ${overtime > 0 ? "bg-amber-50" : "bg-gray-50"}`}>
               <td className={`border px-3 py-1.5 text-right ${overtime > 0 ? "text-amber-700 font-medium" : "text-gray-600"}`}>
-                Overtime (&gt;{OT_HURDLE}h)
+                Overtime (Mon–Fri &gt;{OT_HURDLE}h + Sat/Sun)
               </td>
               {dayOvertime.map((h, i) => (
                 <td key={i} className={`border px-2 py-1.5 text-center ${h > 0 ? "text-amber-700 font-medium" : ""}`}>

@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { supabase } from "@platform/supabase";
 import { useAuth } from "@platform/auth/AuthProvider";
 import { AuthButton } from "@platform/auth/AuthButton";
 import { EmployeePicker } from "@/components/EmployeePicker";
@@ -13,8 +15,23 @@ import type { Employee } from "@/lib/types";
 
 export default function TimesheetsPage() {
   const { user, loading } = useAuth();
+  const searchParams = useSearchParams();
   const [employee, setEmployee] = useState<Employee | null>(null);
-  const [monday, setMonday] = useState(() => getMonday(new Date()));
+  const [monday, setMonday] = useState(() => {
+    const weekParam = searchParams.get("week");
+    if (weekParam) return getMonday(new Date(weekParam + "T00:00:00"));
+    return getMonday(new Date());
+  });
+
+  // Load employee from query param
+  useEffect(() => {
+    const empId = searchParams.get("employee");
+    if (!empId) return;
+    (async () => {
+      const { data } = await supabase.from("employees").select("id, first_name, last_name, active").eq("id", empId).maybeSingle();
+      if (data) setEmployee(data);
+    })();
+  }, [searchParams]);
   const [refreshKey, setRefreshKey] = useState(0);
   const onApprovalChange = () => setRefreshKey((k) => k + 1);
 

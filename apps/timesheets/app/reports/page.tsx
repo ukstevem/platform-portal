@@ -7,6 +7,7 @@ import { useAuth } from "@platform/auth/AuthProvider";
 import { AuthButton } from "@platform/auth/AuthButton";
 import { getMonday, toISO, formatWeekRange, getWeekDates, DAY_LABELS } from "@/lib/weekHelpers";
 import { calculateBradford, BRADFORD_THRESHOLDS, type BradfordResult } from "@/lib/bradford";
+import XLSX from "xlsx-js-style";
 
 type RawEntry = {
   project_item: string;
@@ -78,7 +79,9 @@ export default function ReportsPage() {
   const { user, loading: authLoading } = useAuth();
   const [entries, setEntries] = useState<RawEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<"weekly" | "monthly">("monthly");
   const [weeksBack, setWeeksBack] = useState(4);
+  const [monthsBack, setMonthsBack] = useState(3);
   const [drilldown, setDrilldown] = useState<DrilldownSelection>(null);
   const [drilldownData, setDrilldownData] = useState<DrilldownEntry[]>([]);
   const [drilldownLoading, setDrilldownLoading] = useState(false);
@@ -90,32 +93,46 @@ export default function ReportsPage() {
 
   const { rangeStart, rangeEnd } = useMemo(() => {
     const now = new Date();
+    if (viewMode === "monthly") {
+      const start = new Date(now.getFullYear(), now.getMonth() - (monthsBack - 1), 1);
+      return { rangeStart: toISO(start), rangeEnd: toISO(now) };
+    }
     const currentMonday = getMonday(now);
     const start = new Date(currentMonday);
     start.setDate(start.getDate() - (weeksBack - 1) * 7);
     return { rangeStart: toISO(start), rangeEnd: toISO(now) };
-  }, [weeksBack]);
+  }, [weeksBack, monthsBack, viewMode]);
 
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       setLoading(true);
-      const { data, error } = await supabase
-        .from("timesheet_entries")
-        .select("project_item, work_date, hours, employee_id")
-        .gte("work_date", rangeStart)
-        .lte("work_date", rangeEnd)
-        .order("project_item")
-        .order("work_date");
+      let all: RawEntry[] = [];
+      let from = 0;
+      const pageSize = 1000;
+      while (true) {
+        const { data, error } = await supabase
+          .from("timesheet_entries")
+          .select("project_item, work_date, hours, employee_id")
+          .gte("work_date", rangeStart)
+          .lte("work_date", rangeEnd)
+          .order("project_item")
+          .order("work_date")
+          .range(from, from + pageSize - 1);
+
+        if (cancelled) return;
+        if (error) {
+          console.error("Failed to load report data", error);
+          break;
+        }
+        all = all.concat(data ?? []);
+        if (!data || data.length < pageSize) break;
+        from += pageSize;
+      }
 
       if (cancelled) return;
-      if (error) {
-        console.error("Failed to load report data", error);
-        setLoading(false);
-        return;
-      }
-      setEntries(data ?? []);
+      setEntries(all);
       setLoading(false);
     })();
 
@@ -237,17 +254,29 @@ export default function ReportsPage() {
 
     (async () => {
       setDrilldownLoading(true);
-      const mon = new Date(drilldown.mondayISO + "T00:00:00");
-      const weekDts = getWeekDates(mon);
-      const weekStart = toISO(weekDts[0]);
-      const weekEnd = toISO(weekDts[6]);
+
+      let periodStart: string;
+      let periodEnd: string;
+      const isMonthKey = drilldown.mondayISO.length === 7; // "2026-03"
+
+      if (isMonthKey) {
+        const [y, m] = drilldown.mondayISO.split("-").map(Number);
+        periodStart = `${y}-${String(m).padStart(2, "0")}-01`;
+        const lastDay = new Date(y, m, 0).getDate();
+        periodEnd = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+      } else {
+        const mon = new Date(drilldown.mondayISO + "T00:00:00");
+        const weekDts = getWeekDates(mon);
+        periodStart = toISO(weekDts[0]);
+        periodEnd = toISO(weekDts[6]);
+      }
 
       const { data: rawEntries } = await supabase
         .from("timesheet_entries")
         .select("work_date, hours, employee_id")
         .eq("project_item", drilldown.project_item)
-        .gte("work_date", weekStart)
-        .lte("work_date", weekEnd)
+        .gte("work_date", periodStart)
+        .lte("work_date", periodEnd)
         .order("work_date");
 
       if (cancelled) return;
@@ -276,17 +305,37 @@ export default function ReportsPage() {
     return () => { cancelled = true; };
   }, [drilldown]);
 
+  // Returns the bucket key for a given date (mondayISO for weekly, YYYY-MM for monthly)
+  const getBucketKey = useMemo(() => {
+    if (viewMode === "monthly") {
+      return (dateStr: string) => dateStr.slice(0, 7); // "2026-03"
+    }
+    return (dateStr: string) => {
+      const d = new Date(dateStr + "T00:00:00");
+      return toISO(getMonday(d));
+    };
+  }, [viewMode]);
+
   const weekColumns = useMemo<WeekColumn[]>(() => {
     const cols: WeekColumn[] = [];
     const now = new Date();
-    const currentMonday = getMonday(now);
-    for (let i = weeksBack - 1; i >= 0; i--) {
-      const mon = new Date(currentMonday);
-      mon.setDate(mon.getDate() - i * 7);
-      cols.push({ mondayISO: toISO(mon), label: formatWeekRange(mon) });
+    if (viewMode === "monthly") {
+      for (let i = monthsBack - 1; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+        const label = d.toLocaleDateString("en-GB", { month: "short", year: "numeric" });
+        cols.push({ mondayISO: key, label });
+      }
+    } else {
+      const currentMonday = getMonday(now);
+      for (let i = weeksBack - 1; i >= 0; i--) {
+        const mon = new Date(currentMonday);
+        mon.setDate(mon.getDate() - i * 7);
+        cols.push({ mondayISO: toISO(mon), label: formatWeekRange(mon) });
+      }
     }
     return cols;
-  }, [weeksBack]);
+  }, [weeksBack, monthsBack, viewMode]);
 
   // Build project groups with item breakdown
   const projectGroups = useMemo<ProjectGroup[]>(() => {
@@ -294,14 +343,14 @@ export default function ReportsPage() {
     const itemMap = new Map<string, Record<string, number>>();
 
     for (const e of entries) {
-      const entryDate = new Date(e.work_date + "T00:00:00");
-      const mondayISO = toISO(getMonday(entryDate));
+      if (e.project_item === "SICK-01") continue; // Sick tracked separately
+      const bucketKey = getBucketKey(e.work_date);
 
       if (!itemMap.has(e.project_item)) {
         itemMap.set(e.project_item, {});
       }
       const weekHours = itemMap.get(e.project_item)!;
-      weekHours[mondayISO] = (weekHours[mondayISO] ?? 0) + Number(e.hours);
+      weekHours[bucketKey] = (weekHours[bucketKey] ?? 0) + Number(e.hours);
     }
 
     const itemRows: ItemRow[] = Array.from(itemMap.entries())
@@ -340,7 +389,7 @@ export default function ReportsPage() {
         };
       })
       .sort((a, b) => {
-        const BOTTOM = new Set(["SHOPWORK", "HOLIDAY", "TRAINING", "SICK"]);
+        const BOTTOM = new Set(["SHOPWORK", "HOLIDAY", "TRAINING"]);
         const aBottom = BOTTOM.has(a.projectnumber);
         const bBottom = BOTTOM.has(b.projectnumber);
         if (aBottom !== bBottom) return aBottom ? 1 : -1;
@@ -348,7 +397,21 @@ export default function ReportsPage() {
       });
 
     return groups;
-  }, [entries]);
+  }, [entries, getBucketKey]);
+
+  // Sick hours tracked separately (not in totals)
+  const sickByWeek = useMemo(() => {
+    const m: Record<string, number> = {};
+    let total = 0;
+    for (const e of entries) {
+      if (e.project_item !== "SICK-01") continue;
+      const key = getBucketKey(e.work_date);
+      const hrs = Number(e.hours);
+      m[key] = (m[key] ?? 0) + hrs;
+      total += hrs;
+    }
+    return { weekHours: m, total };
+  }, [entries, getBucketKey]);
 
   const weekTotals = useMemo(() => {
     const totals: Record<string, number> = {};
@@ -362,12 +425,14 @@ export default function ReportsPage() {
 
   const grandTotal = projectGroups.reduce((sum, g) => sum + g.total, 0);
 
-  // Overtime calculation: per employee per week, 40h hurdle
+  // Overtime calculation: always per employee per week (40h hurdle),
+  // then bucketed into the current view columns
   const OT_HURDLE = 40;
   const { weekStraight, weekOvertime, totalStraight, totalOvertime } = useMemo(() => {
-    // Sum total hours per employee per week
+    // Sum total hours per employee per WEEK (OT is always weekly)
     const empWeekHours = new Map<string, Map<string, number>>();
     for (const e of entries) {
+      if (e.project_item === "SICK-01") continue; // Sick excluded from OT calc
       const entryDate = new Date(e.work_date + "T00:00:00");
       const mondayISO = toISO(getMonday(entryDate));
 
@@ -378,16 +443,18 @@ export default function ReportsPage() {
       weekMap.set(mondayISO, (weekMap.get(mondayISO) ?? 0) + Number(e.hours));
     }
 
-    // For each week, sum straight and OT across all employees
+    // Calculate ST/OT per employee per week, then bucket into view columns
     const wStraight: Record<string, number> = {};
     const wOvertime: Record<string, number> = {};
 
-    for (const [, weekMap] of empWeekHours) {
+    for (const [empId, weekMap] of empWeekHours) {
       for (const [mondayISO, totalHrs] of weekMap) {
         const st = Math.min(totalHrs, OT_HURDLE);
         const ot = Math.max(totalHrs - OT_HURDLE, 0);
-        wStraight[mondayISO] = (wStraight[mondayISO] ?? 0) + st;
-        wOvertime[mondayISO] = (wOvertime[mondayISO] ?? 0) + ot;
+        // Bucket by view mode: for monthly, use the monday's month
+        const bucketKey = viewMode === "monthly" ? mondayISO.slice(0, 7) : mondayISO;
+        wStraight[bucketKey] = (wStraight[bucketKey] ?? 0) + st;
+        wOvertime[bucketKey] = (wOvertime[bucketKey] ?? 0) + ot;
       }
     }
 
@@ -402,7 +469,7 @@ export default function ReportsPage() {
       totalStraight: tStraight,
       totalOvertime: tOvertime,
     };
-  }, [entries]);
+  }, [entries, viewMode]);
 
   const handleCellClick = (project_item: string, mondayISO: string, hours: number) => {
     if (hours === 0) return;
@@ -428,19 +495,57 @@ export default function ReportsPage() {
   // Drilldown by employee
   const drilldownByEmployee = useMemo(() => {
     if (!drilldown) return null;
-    const mon = new Date(drilldown.mondayISO + "T00:00:00");
-    const weekDts = getWeekDates(mon);
-    const weekISOs = weekDts.map(toISO);
 
+    const isMonthKey = drilldown.mondayISO.length === 7;
+
+    let dateCols: { iso: string; label: string }[];
+    if (isMonthKey) {
+      // Monthly: show week columns within the month
+      const [y, m] = drilldown.mondayISO.split("-").map(Number);
+      const firstDay = new Date(y, m - 1, 1);
+      const lastDay = new Date(y, m, 0).getDate();
+      const weeks: { iso: string; label: string }[] = [];
+      // Find all Mondays in the month (or start from day 1 if not Monday)
+      let d = new Date(firstDay);
+      // Go to first Monday
+      while (d.getDay() !== 1) d.setDate(d.getDate() + 1);
+      // Include week starting before month if month doesn't start on Monday
+      if (d.getDate() > 1) {
+        const prevMon = new Date(d);
+        prevMon.setDate(prevMon.getDate() - 7);
+        weeks.push({ iso: toISO(prevMon), label: `W/C ${prevMon.getDate()}/${prevMon.getMonth() + 1}` });
+      }
+      while (d.getMonth() === m - 1) {
+        weeks.push({ iso: toISO(d), label: `W/C ${d.getDate()}/${d.getMonth() + 1}` });
+        d.setDate(d.getDate() + 7);
+      }
+      dateCols = weeks;
+    } else {
+      const mon = new Date(drilldown.mondayISO + "T00:00:00");
+      const weekDts = getWeekDates(mon);
+      dateCols = weekDts.map((dt, i) => ({
+        iso: toISO(dt),
+        label: `${DAY_LABELS[i]} ${dt.getDate()}/${dt.getMonth() + 1}`,
+      }));
+    }
+
+    // Bucket employee hours into date columns
     const empMap = new Map<string, Record<string, number>>();
     for (const e of drilldownData) {
       if (!empMap.has(e.employee_name)) empMap.set(e.employee_name, {});
-      empMap.get(e.employee_name)![e.work_date] = e.hours;
+      if (isMonthKey) {
+        // Bucket by week (find which Monday this date belongs to)
+        const entryDate = new Date(e.work_date + "T00:00:00");
+        const mondayISO = toISO(getMonday(entryDate));
+        const rec = empMap.get(e.employee_name)!;
+        rec[mondayISO] = (rec[mondayISO] ?? 0) + e.hours;
+      } else {
+        empMap.get(e.employee_name)![e.work_date] = e.hours;
+      }
     }
 
     return {
-      weekDates: weekDts,
-      weekISOs,
+      dateCols,
       employees: Array.from(empMap.entries())
         .map(([name, days]) => ({
           name,
@@ -476,19 +581,143 @@ export default function ReportsPage() {
       </div>
 
       <div className="flex items-center gap-4 mb-4">
-        <label className="text-sm font-medium">Show last:</label>
-        {[4, 8, 12, 26, 52].map((w) => (
+        <div className="flex rounded border overflow-hidden">
           <button
-            key={w}
             type="button"
-            onClick={() => { setWeeksBack(w); setDrilldown(null); }}
-            className={`rounded border px-3 py-1 text-sm cursor-pointer ${
-              weeksBack === w ? "bg-blue-600 text-white border-blue-600" : "hover:bg-gray-100"
+            onClick={() => { setViewMode("weekly"); setDrilldown(null); }}
+            className={`px-3 py-1 text-sm cursor-pointer ${
+              viewMode === "weekly" ? "bg-blue-600 text-white" : "hover:bg-gray-100"
             }`}
           >
-            {w} weeks
+            Weekly
           </button>
-        ))}
+          <button
+            type="button"
+            onClick={() => { setViewMode("monthly"); setDrilldown(null); }}
+            className={`px-3 py-1 text-sm cursor-pointer ${
+              viewMode === "monthly" ? "bg-blue-600 text-white" : "hover:bg-gray-100"
+            }`}
+          >
+            Monthly
+          </button>
+        </div>
+        <label className="text-sm font-medium">Show last:</label>
+        {viewMode === "weekly" ? (
+          [4, 8, 12, 26, 52].map((w) => (
+            <button
+              key={w}
+              type="button"
+              onClick={() => { setWeeksBack(w); setDrilldown(null); }}
+              className={`rounded border px-3 py-1 text-sm cursor-pointer ${
+                weeksBack === w ? "bg-blue-600 text-white border-blue-600" : "hover:bg-gray-100"
+              }`}
+            >
+              {w} weeks
+            </button>
+          ))
+        ) : (
+          [3, 6, 12].map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => { setMonthsBack(m); setDrilldown(null); }}
+              className={`rounded border px-3 py-1 text-sm cursor-pointer ${
+                monthsBack === m ? "bg-blue-600 text-white border-blue-600" : "hover:bg-gray-100"
+              }`}
+            >
+              {m} months
+            </button>
+          ))
+        )}
+        <button
+          type="button"
+          onClick={() => {
+            const NAVY = "061B37";
+            const borderThin = {
+              top: { style: "thin", color: { rgb: "000000" } },
+              bottom: { style: "thin", color: { rgb: "000000" } },
+              left: { style: "thin", color: { rgb: "000000" } },
+              right: { style: "thin", color: { rgb: "000000" } },
+            } as const;
+            const hdrStyle = {
+              font: { bold: true, color: { rgb: "FFFFFF" }, sz: 10 },
+              fill: { fgColor: { rgb: NAVY } },
+              alignment: { horizontal: "center" as const, vertical: "center" as const },
+              border: borderThin,
+            };
+            const titleStyle = { font: { bold: true, sz: 14, color: { rgb: NAVY } } };
+            const cellText = { font: { sz: 10 }, border: borderThin, alignment: { vertical: "center" as const } };
+            const cellNum = { ...cellText, alignment: { horizontal: "right" as const, vertical: "center" as const }, numFmt: "0.00" };
+            const cellBold = { ...cellNum, font: { sz: 10, bold: true } };
+            const cellIndent = { ...cellText, font: { sz: 9, color: { rgb: "666666" } } };
+            const cellOT = { ...cellNum, font: { sz: 10, color: { rgb: "D97706" } } };
+            const totalRowStyle = { ...cellBold, fill: { fgColor: { rgb: "F3F4F6" } } };
+            const totalRowLabel = { ...cellText, font: { sz: 10, bold: true }, fill: { fgColor: { rgb: "F3F4F6" } }, alignment: { horizontal: "right" as const, vertical: "center" as const } };
+
+            const nc = (v: number, s: object) => v > 0 ? { v, t: "n", s } : { v: "", t: "s", s: cellText };
+            const tc = (v: string, s?: object) => ({ v, t: "s", s: s ?? cellText });
+
+            const colHeaders = ["Project", ...weekColumns.map((wc) => wc.label), "Total"];
+            const wsRows: object[][] = [
+              [{ v: viewMode === "monthly" ? `Project Hours Report — ${monthsBack} months` : `Project Hours Report — ${weeksBack} weeks`, t: "s", s: titleStyle }],
+              [],
+              colHeaders.map((h) => ({ v: h, t: "s", s: hdrStyle })),
+            ];
+
+            for (const group of projectGroups) {
+              const label = group.hasMultipleItems ? group.projectnumber : group.items[0].project_item;
+              const desc = group.hasMultipleItems ? "" : (descMap.get(group.items[0].project_item) ?? "");
+              const displayName = desc ? `${label} — ${desc}` : label;
+              const style = group.hasMultipleItems ? cellBold : cellNum;
+              wsRows.push([
+                tc(displayName, group.hasMultipleItems ? { ...cellText, font: { sz: 10, bold: true } } : cellText),
+                ...weekColumns.map((wc) => nc(group.weekHours[wc.mondayISO] ?? 0, style)),
+                nc(group.total, cellBold),
+              ]);
+              if (group.hasMultipleItems) {
+                for (const item of group.items) {
+                  const itemDesc = descMap.get(item.project_item) ?? "";
+                  wsRows.push([
+                    tc(`  ${item.project_item}${itemDesc ? ` — ${itemDesc}` : ""}`, cellIndent),
+                    ...weekColumns.map((wc) => nc(item.weekHours[wc.mondayISO] ?? 0, cellNum)),
+                    nc(item.total, cellNum),
+                  ]);
+                }
+              }
+            }
+            wsRows.push([]);
+            wsRows.push([tc("Weekly totals", totalRowLabel), ...weekColumns.map((wc) => nc(weekTotals[wc.mondayISO] ?? 0, totalRowStyle)), nc(grandTotal, totalRowStyle)]);
+            wsRows.push([tc("Straight time", totalRowLabel), ...weekColumns.map((wc) => nc(weekStraight[wc.mondayISO] ?? 0, totalRowStyle)), nc(totalStraight, totalRowStyle)]);
+            wsRows.push([tc("Overtime", totalRowLabel), ...weekColumns.map((wc) => nc(weekOvertime[wc.mondayISO] ?? 0, cellOT)), nc(totalOvertime, cellOT)]);
+
+            // Sick row (separate from totals)
+            if (sickByWeek.total > 0) {
+              const cellSick = { ...cellNum, font: { sz: 10, color: { rgb: "DC2626" } } };
+              const sickLabel = { ...totalRowLabel, font: { sz: 10, bold: true, color: { rgb: "DC2626" } }, fill: { fgColor: { rgb: "FEF2F2" } } };
+              const sickCell = { ...cellSick, fill: { fgColor: { rgb: "FEF2F2" } } };
+              wsRows.push([]);
+              wsRows.push([tc("Sick (not included in totals)", sickLabel), ...weekColumns.map((wc) => nc(sickByWeek.weekHours[wc.mondayISO] ?? 0, sickCell)), nc(sickByWeek.total, sickCell)]);
+            }
+
+            const ws = XLSX.utils.aoa_to_sheet(wsRows);
+            ws["!merges"] = [
+              { s: { r: 0, c: 0 }, e: { r: 0, c: weekColumns.length + 1 } },
+            ];
+            ws["!cols"] = [{ wch: 35 }, ...weekColumns.map(() => ({ wch: 14 })), { wch: 12 }];
+            ws["!rows"] = [{ hpt: 24 }, { hpt: 6 }, { hpt: 22 }];
+
+            const wb = XLSX.utils.book_new();
+            const sheetName = viewMode === "monthly" ? `${monthsBack}mo` : `${weeksBack}wk`;
+            XLSX.utils.book_append_sheet(wb, ws, sheetName);
+            const now = new Date();
+            const dateStr = `${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+            XLSX.writeFile(wb, `project-hours-${dateStr}-${sheetName}.xlsx`);
+          }}
+          disabled={projectGroups.length === 0}
+          className="rounded border px-3 py-1 text-sm cursor-pointer hover:bg-gray-100 disabled:opacity-50 ml-auto"
+        >
+          Excel
+        </button>
       </div>
 
       {loading ? (
@@ -508,8 +737,12 @@ export default function ReportsPage() {
                   </th>
                   {weekColumns.map((wc) => (
                     <th key={wc.mondayISO} className="border px-2 py-2 text-center text-xs whitespace-nowrap min-w-24 bg-gray-50">
-                      {wc.label.split(" – ")[0]}<br />
-                      <span className="text-gray-400">{wc.label.split(" – ")[1]}</span>
+                      {viewMode === "monthly" ? (
+                        wc.label
+                      ) : (
+                        <>{wc.label.split(" – ")[0]}<br />
+                        <span className="text-gray-400">{wc.label.split(" – ")[1]}</span></>
+                      )}
                     </th>
                   ))}
                   <th className="border px-3 py-2 text-center font-bold min-w-20 sticky right-28 bg-gray-50 z-30">Total</th>
@@ -606,7 +839,7 @@ export default function ReportsPage() {
                 })}
 
                 {/* Totals row */}
-                <tr className="bg-gray-50 font-medium sticky bottom-20 z-20">
+                <tr className={`bg-gray-50 font-medium sticky z-20 ${viewMode === "weekly" ? (sickByWeek.total > 0 ? "bottom-32" : "bottom-20") : (sickByWeek.total > 0 ? "bottom-20" : "bottom-13")}`}>
                   <td className="border px-3 py-2 text-right sticky left-0 bg-gray-50 z-30">Weekly totals</td>
                   {weekColumns.map((wc) => {
                     const t = weekTotals[wc.mondayISO] ?? 0;
@@ -623,7 +856,7 @@ export default function ReportsPage() {
                 </tr>
 
                 {/* Straight time row */}
-                <tr className="bg-gray-50 text-xs sticky bottom-13 z-20">
+                <tr className={`bg-gray-50 text-xs sticky z-20 ${viewMode === "weekly" ? (sickByWeek.total > 0 ? "bottom-26" : "bottom-13") : (sickByWeek.total > 0 ? "bottom-13" : "bottom-6.5")}`}>
                   <td className="border px-3 py-1.5 text-right text-gray-600 sticky left-0 bg-gray-50 z-30">
                     Straight time (≤{OT_HURDLE}h/employee/week)
                   </td>
@@ -642,7 +875,7 @@ export default function ReportsPage() {
                 </tr>
 
                 {/* Overtime row */}
-                <tr className={`text-xs sticky bottom-6.5 z-20 ${totalOvertime > 0 ? "bg-amber-50" : "bg-gray-50"}`}>
+                <tr className={`text-xs sticky z-20 ${viewMode === "weekly" ? (sickByWeek.total > 0 ? "bottom-20" : "bottom-6.5") : (sickByWeek.total > 0 ? "bottom-6.5" : "bottom-0")} ${totalOvertime > 0 ? "bg-amber-50" : "bg-gray-50"}`}>
                   <td className={`border px-3 py-1.5 text-right sticky left-0 z-30 ${totalOvertime > 0 ? "bg-amber-50 text-amber-700 font-medium" : "bg-gray-50 text-gray-600"}`}>
                     Overtime (&gt;{OT_HURDLE}h/employee/week)
                   </td>
@@ -660,8 +893,8 @@ export default function ReportsPage() {
                   <td className={`border sticky right-0 z-30 ${totalOvertime > 0 ? "bg-amber-50" : "bg-gray-50"}`}></td>
                 </tr>
 
-                {/* Approval status row */}
-                <tr className="sticky bottom-0 z-20 bg-white">
+                {/* Approval status row (weekly view only) */}
+                {viewMode === "weekly" && <tr className={`sticky z-20 bg-white ${sickByWeek.total > 0 ? "bottom-6.5" : "bottom-0"}`}>
                   <td className="border px-3 py-1.5 text-right text-xs font-medium sticky left-0 bg-white z-30">
                     Approval status
                   </td>
@@ -682,7 +915,28 @@ export default function ReportsPage() {
                   })}
                   <td className="border px-3 py-1.5 text-center sticky right-28 bg-white z-30"></td>
                   <td className="border sticky right-0 bg-white z-30"></td>
-                </tr>
+                </tr>}
+
+                {/* Sick row — separate from cost totals */}
+                {sickByWeek.total > 0 && (
+                  <tr className="bg-red-50 sticky bottom-0 z-20">
+                    <td className="border px-3 py-1.5 text-right text-xs font-medium sticky left-0 bg-red-50 z-10 text-red-600">
+                      Sick (not included in totals)
+                    </td>
+                    {weekColumns.map((wc) => {
+                      const h = sickByWeek.weekHours[wc.mondayISO] ?? 0;
+                      return (
+                        <td key={wc.mondayISO} className="border px-2 py-1.5 text-center text-red-600 text-xs">
+                          {h > 0 ? h : "–"}
+                        </td>
+                      );
+                    })}
+                    <td className="border px-3 py-1.5 text-center font-bold text-red-600 sticky right-28 bg-red-50 z-10">
+                      {sickByWeek.total}
+                    </td>
+                    <td className="border sticky right-0 bg-red-50 z-10"></td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -694,7 +948,9 @@ export default function ReportsPage() {
                 <div className="text-sm font-medium">
                   <span className="font-mono">{drilldown.project_item}</span>
                   {" — "}
-                  {formatWeekRange(new Date(drilldown.mondayISO + "T00:00:00"))}
+                  {drilldown.mondayISO.length === 7
+                    ? new Date(drilldown.mondayISO + "-01T00:00:00").toLocaleDateString("en-GB", { month: "long", year: "numeric" })
+                    : formatWeekRange(new Date(drilldown.mondayISO + "T00:00:00"))}
                 </div>
                 <button
                   type="button"
@@ -713,12 +969,9 @@ export default function ReportsPage() {
                     <thead>
                       <tr className="bg-gray-50">
                         <th className="border-b px-4 py-2 text-left">Employee</th>
-                        {drilldownByEmployee.weekDates.map((d, i) => (
-                          <th key={i} className="border-b px-2 py-2 text-center w-18">
-                            <div>{DAY_LABELS[i]}</div>
-                            <div className="text-xs text-gray-500 font-normal">
-                              {d.getDate()}/{d.getMonth() + 1}
-                            </div>
+                        {drilldownByEmployee.dateCols.map((col) => (
+                          <th key={col.iso} className="border-b px-2 py-2 text-center text-xs whitespace-nowrap">
+                            {col.label}
                           </th>
                         ))}
                         <th className="border-b px-3 py-2 text-center">Total</th>
@@ -728,10 +981,10 @@ export default function ReportsPage() {
                       {drilldownByEmployee.employees.map((emp) => (
                         <tr key={emp.name} className="hover:bg-gray-50">
                           <td className="border-b px-4 py-1.5">{emp.name}</td>
-                          {drilldownByEmployee.weekISOs.map((iso) => {
-                            const h = emp.days[iso] ?? 0;
+                          {drilldownByEmployee.dateCols.map((col) => {
+                            const h = emp.days[col.iso] ?? 0;
                             return (
-                              <td key={iso} className="border-b px-2 py-1.5 text-center">
+                              <td key={col.iso} className="border-b px-2 py-1.5 text-center">
                                 {h > 0 ? h : "–"}
                               </td>
                             );
