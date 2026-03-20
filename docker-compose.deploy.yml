@@ -10,6 +10,7 @@ services:
       - jobcards
       - documents
       - timesheets
+      - operations
 
   portal:
     image: ghcr.io/ukstevem/platform-portal/portal:latest
@@ -45,3 +46,11 @@ services:
     environment:
       - APP_NAME=timesheets
       - PORT=3003
+
+  operations:
+    image: ghcr.io/ukstevem/platform-portal/operations:latest
+    container_name: platform_operations
+    restart: unless-stopped
+    environment:
+      - APP_NAME=operations
+      - PORT=3004

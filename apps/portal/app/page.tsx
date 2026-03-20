@@ -19,6 +19,11 @@ const apps = [
     href: "/jobcards/",
     description: "Create and manage job cards for workshop and site work.",
   },
+  {
+    name: "Operations",
+    href: "/operations/",
+    description: "Project cost overview combining labour hours, purchase orders, and invoices.",
+  },
 ];
 
 export default function PortalHome() {

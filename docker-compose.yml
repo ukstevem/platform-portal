@@ -11,6 +11,7 @@ services:
       - jobcards
       - documents
       - timesheets
+      - operations
 
   portal:
     build:
@@ -75,6 +76,21 @@ services:
       - timesheets_root_nm:/repo/node_modules
       - timesheets_node_modules:/repo/apps/timesheets/node_modules
 
+  operations:
+    build:
+      context: .
+      dockerfile: docker/node/Dockerfile.dev
+    container_name: platform_operations
+    working_dir: /repo
+    env_file: .env
+    command:
+      ["sh", "-lc", "corepack enable && corepack prepare pnpm@9.15.0 --activate && pnpm install && pnpm -C apps/operations dev --hostname 0.0.0.0 --port 3004"]
+    volumes:
+      - ./:/repo
+      - operations_pnpm_store:/repo/.pnpm-store
+      - operations_root_nm:/repo/node_modules
+      - operations_node_modules:/repo/apps/operations/node_modules
+
 volumes:
   portal_pnpm_store:
   portal_root_nm:
@@ -88,3 +104,6 @@ volumes:
   timesheets_pnpm_store:
   timesheets_root_nm:
   timesheets_node_modules:
+  operations_pnpm_store:
+  operations_root_nm:
+  operations_node_modules:
