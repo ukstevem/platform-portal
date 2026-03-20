@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@platform/supabase";
@@ -14,6 +14,14 @@ import { getMonday } from "@/lib/weekHelpers";
 import type { Employee } from "@/lib/types";
 
 export default function TimesheetsPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center"><p className="text-gray-500">Loading...</p></div>}>
+      <TimesheetsPageInner />
+    </Suspense>
+  );
+}
+
+function TimesheetsPageInner() {
   const { user, loading } = useAuth();
   const searchParams = useSearchParams();
   const [employee, setEmployee] = useState<Employee | null>(null);
