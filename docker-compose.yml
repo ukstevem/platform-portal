@@ -20,6 +20,8 @@ services:
     container_name: platform_portal
     working_dir: /repo
     env_file: .env
+    environment:
+      WATCHPACK_POLLING: "true"
     command:
       ["sh", "-lc", "corepack enable && corepack prepare pnpm@9.15.0 --activate && pnpm install && pnpm -C apps/portal dev --hostname 0.0.0.0 --port 3000"]
     volumes:
@@ -35,6 +37,8 @@ services:
     container_name: platform_jobcards
     working_dir: /repo
     env_file: .env
+    environment:
+      WATCHPACK_POLLING: "true"
     command:
       ["sh", "-lc", "corepack enable && corepack prepare pnpm@9.15.0 --activate && pnpm install && pnpm -C apps/jobcards dev --hostname 0.0.0.0 --port 3001"]
     volumes:
@@ -52,6 +56,7 @@ services:
     env_file: .env
     environment:
       DOC_NAS_ROOT: /data/input
+      WATCHPACK_POLLING: "true"
     command:
       ["sh", "-lc", "corepack enable && corepack prepare pnpm@9.15.0 --activate && pnpm install && pnpm -C apps/documents dev --hostname 0.0.0.0 --port 3002"]
     volumes:
@@ -68,6 +73,8 @@ services:
     container_name: platform_timesheets
     working_dir: /repo
     env_file: .env
+    environment:
+      WATCHPACK_POLLING: "true"
     command:
       ["sh", "-lc", "corepack enable && corepack prepare pnpm@9.15.0 --activate && pnpm install && pnpm -C apps/timesheets dev --hostname 0.0.0.0 --port 3003"]
     volumes:
@@ -83,6 +90,8 @@ services:
     container_name: platform_operations
     working_dir: /repo
     env_file: .env
+    environment:
+      WATCHPACK_POLLING: "true"
     command:
       ["sh", "-lc", "corepack enable && corepack prepare pnpm@9.15.0 --activate && pnpm install && pnpm -C apps/operations dev --hostname 0.0.0.0 --port 3004"]
     volumes:

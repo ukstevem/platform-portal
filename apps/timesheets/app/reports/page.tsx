@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@platform/supabase";
 import { useAuth } from "@platform/auth/AuthProvider";
@@ -82,6 +82,14 @@ export default function ReportsPage() {
   const [viewMode, setViewMode] = useState<"weekly" | "monthly">("monthly");
   const [weeksBack, setWeeksBack] = useState(4);
   const [monthsBack, setMonthsBack] = useState(3);
+
+  // Highlight a project from URL param (e.g. ?highlight=10312)
+  const [highlightProject, setHighlightProject] = useState<string | null>(null);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const h = params.get("highlight");
+    if (h) setHighlightProject(h);
+  }, []);
   const [drilldown, setDrilldown] = useState<DrilldownSelection>(null);
   const [drilldownData, setDrilldownData] = useState<DrilldownEntry[]>([]);
   const [drilldownLoading, setDrilldownLoading] = useState(false);
@@ -755,8 +763,15 @@ export default function ReportsPage() {
                   return (
                     <Fragment key={group.projectnumber}>
                       {/* Project total row */}
-                      <tr className={`${group.hasMultipleItems ? "font-medium" : ""} hover:bg-gray-50`}>
-                        <td className="border px-3 py-1.5 font-mono text-xs sticky left-0 bg-white z-10">
+                      <tr
+                        ref={(el) => {
+                          if (highlightProject === group.projectnumber && el && !loading) {
+                            el.scrollIntoView({ behavior: "smooth", block: "center" });
+                          }
+                        }}
+                        className={`${group.hasMultipleItems ? "font-medium" : ""} hover:bg-gray-50 ${highlightProject === group.projectnumber ? "bg-blue-50 ring-2 ring-blue-300 ring-inset" : ""}`}
+                      >
+                        <td className={`border px-3 py-1.5 font-mono text-xs sticky left-0 z-10 ${highlightProject === group.projectnumber ? "bg-blue-50" : "bg-white"}`}>
                           <div className="flex items-center gap-1">
                             {group.hasMultipleItems && (
                               <button
