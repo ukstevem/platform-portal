@@ -294,8 +294,9 @@ export default function ProjectCostOverview() {
   // Margin calculations per row
   const marginCalc = (row: { projectValue: number; totalCost: number }) => {
     const targetMarginValue = row.projectValue * (targetMargin / 100);
-    const variance = (row.projectValue - row.totalCost) - targetMarginValue;
-    return { targetMarginValue, variance };
+    const actualMargin = row.projectValue - row.totalCost;
+    const variance = actualMargin - targetMarginValue;
+    return { targetMarginValue, actualMargin, variance };
   };
 
   // Spend profile chart data for selected project
@@ -378,7 +379,7 @@ export default function ProjectCostOverview() {
     const cellGreen = { ...cellC, font: { sz: 10, color: { rgb: "15803D" } } };
     const cellRed = { ...cellC, font: { sz: 10, color: { rgb: "DC2626" } } };
 
-    const headers = ["Project", "Description", "Project Value (£)", "Basic Hours", "OT Hours", "Labour Cost (£)", "Committed (£)", "Invoiced (£)", "Total Cost (£)", `Target Margin (${targetMargin}%)`, "Variance (£)"];
+    const headers = ["Project", "Description", "Project Value (£)", "Basic Hours", "OT Hours", "Labour Cost (£)", "Committed (£)", "Invoiced (£)", "Total Cost (£)", `Target Margin (${targetMargin}%)`, "Actual Margin (£)", "Variance (£)"];
 
     const wsRows: object[][] = [
       [{ v: "Project Cost Overview", t: "s", s: titleS }],
@@ -397,6 +398,7 @@ export default function ProjectCostOverview() {
           nc(r.invoiced, cellC),
           nc(r.totalCost, cellC),
           r.projectValue > 0 ? { v: m.targetMarginValue, t: "n", s: cellC } : { v: "", t: "s", s: cellT },
+          r.projectValue > 0 ? { v: m.actualMargin, t: "n", s: m.actualMargin >= 0 ? cellGreen : cellRed } : { v: "", t: "s", s: cellT },
           r.projectValue > 0 ? { v: m.variance, t: "n", s: m.variance >= 0 ? cellGreen : cellRed } : { v: "", t: "s", s: cellT },
         ];
       }),
@@ -411,19 +413,20 @@ export default function ProjectCostOverview() {
         { v: totals.invoiced, t: "n", s: totC },
         { v: totals.totalCost, t: "n", s: totC },
         (() => { const m = marginCalc(totals); return { v: m.targetMarginValue, t: "n", s: totC }; })(),
+        (() => { const m = marginCalc(totals); return { v: m.actualMargin, t: "n", s: { ...totC, font: { sz: 10, bold: true, color: { rgb: m.actualMargin >= 0 ? "15803D" : "DC2626" } } } }; })(),
         (() => { const m = marginCalc(totals); return { v: m.variance, t: "n", s: { ...totC, font: { sz: 10, bold: true, color: { rgb: m.variance >= 0 ? "15803D" : "DC2626" } } } }; })(),
       ],
     ];
 
     const ws = XLSX.utils.aoa_to_sheet(wsRows);
     ws["!merges"] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: 10 } },
-      { s: { r: 1, c: 0 }, e: { r: 1, c: 10 } },
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 11 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 11 } },
     ];
     ws["!cols"] = [
       { wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 14 }, { wch: 12 },
       { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 16 },
-      { wch: 16 }, { wch: 16 },
+      { wch: 16 }, { wch: 14 }, { wch: 16 },
     ];
     ws["!rows"] = [{ hpt: 24 }, { hpt: 18 }, { hpt: 22 }];
 
@@ -530,6 +533,7 @@ export default function ProjectCostOverview() {
                 <th className="border px-3 py-2 text-right min-w-28">Invoiced</th>
                 <th className="border px-3 py-2 text-right min-w-28">Total Cost</th>
                 <th className="border px-3 py-2 text-right min-w-28">Target Margin</th>
+                <th className="border px-3 py-2 text-right min-w-24">Actual Margin</th>
                 <th className="border px-3 py-2 text-right min-w-28">Variance</th>
               </tr>
             </thead>
@@ -579,6 +583,9 @@ export default function ProjectCostOverview() {
                         return (
                           <>
                             <td className="border px-3 py-1.5 text-right">{row.projectValue > 0 ? fmtCurrency(m.targetMarginValue) : "–"}</td>
+                            <td className={`border px-3 py-1.5 text-right font-medium ${row.projectValue > 0 ? (m.actualMargin >= 0 ? "text-green-700" : "text-red-600") : ""}`}>
+                              {row.projectValue > 0 ? fmtSignedCurrency(m.actualMargin) : "–"}
+                            </td>
                             <td className={`border px-3 py-1.5 text-right font-medium ${row.projectValue > 0 ? (m.variance >= 0 ? "text-green-700" : "text-red-600") : ""}`}>
                               {row.projectValue > 0 ? fmtSignedCurrency(m.variance) : "–"}
                             </td>
@@ -603,6 +610,7 @@ export default function ProjectCostOverview() {
                         <td className="border px-3 py-1 text-right text-xs">–</td>
                         <td className="border px-3 py-1 text-right text-xs">–</td>
                         <td className="border px-3 py-1 text-right text-xs">{fmtCurrency(item.totalCost)}</td>
+                        <td className="border px-3 py-1 text-right text-xs">–</td>
                         <td className="border px-3 py-1 text-right text-xs">–</td>
                         <td className="border px-3 py-1 text-right text-xs">–</td>
                       </tr>
@@ -630,6 +638,9 @@ export default function ProjectCostOverview() {
                   return (
                     <>
                       <td className="border px-3 py-2 text-right bg-gray-50">{fmtCurrency(m.targetMarginValue)}</td>
+                      <td className={`border px-3 py-2 text-right font-bold bg-gray-50 ${m.actualMargin >= 0 ? "text-green-700" : "text-red-600"}`}>
+                        {fmtSignedCurrency(m.actualMargin)}
+                      </td>
                       <td className={`border px-3 py-2 text-right font-bold bg-gray-50 ${m.variance >= 0 ? "text-green-700" : "text-red-600"}`}>
                         {fmtSignedCurrency(m.variance)}
                       </td>
