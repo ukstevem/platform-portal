@@ -116,6 +116,7 @@ export default function WagePrepPage() {
       // Split hours by day of week and type
       let monFriHours = 0;
       let saturdayHours = 0;
+      let sundayHours = 0;
       let holidayHours = 0;
       let sickHours = 0;
       const projectHoursMap = new Map<string, number>();
@@ -137,6 +138,8 @@ export default function WagePrepPage() {
           monFriHours += hrs;
         } else if (dayOfWeek === 6) {
           saturdayHours += hrs;
+        } else if (dayOfWeek === 0) {
+          sundayHours += hrs;
         }
         projectHoursMap.set(e.project_item, (projectHoursMap.get(e.project_item) ?? 0) + hrs);
       }
@@ -145,7 +148,8 @@ export default function WagePrepPage() {
       // 1. Basic = first 40h cumulative Mon-Fri
       // 2. Once 40h hit: remaining Mon-Fri hours = 1.5x
       // 3. If threshold met: Sat first satX15Limit (5h) = 1.5x, Sat beyond = 2.0x
-      // 4. If threshold NOT met: no OT, Sat is basic
+      // 4. Sunday: all hours at 2.0x (if threshold met)
+      // 5. If threshold NOT met: no OT, Sat/Sun fill basic
       let basic: number;
       let x15 = 0;
       let x20 = 0;
@@ -157,24 +161,74 @@ export default function WagePrepPage() {
         const satX15 = Math.min(saturdayHours, satX15Limit);
         const satX20 = Math.max(saturdayHours - satX15Limit, 0);
         x15 = monFriOT + satX15;
-        x20 = satX20;
+        x20 = satX20 + sundayHours;
       } else {
-        // Threshold not met — Fri/Sat fill basic, no OT
-        basic = Math.min(monFriHours + saturdayHours, basicThreshold);
+        // Threshold not met — Fri/Sat/Sun fill basic, no OT
+        basic = Math.min(monFriHours + saturdayHours + sundayHours, basicThreshold);
       }
 
-      // OT project breakdown from flagged entries
-      const otProjectMap = new Map<string, number>();
+      // OT project breakdown from flagged entries, split by rate
+      const otProjectRateMap = new Map<string, { x15: number; x20: number }>();
       for (const e of empEntries) {
         if (e.is_overtime && e.project_item !== "HOLIDAY-01" && e.project_item !== "SICK-01" && e.project_item !== "TRAINING-01") {
-          otProjectMap.set(e.project_item, (otProjectMap.get(e.project_item) ?? 0) + Number(e.hours));
+          const hrs = Number(e.hours);
+          const dayOfWeek = new Date(e.work_date + "T00:00:00").getDay();
+          if (!otProjectRateMap.has(e.project_item)) otProjectRateMap.set(e.project_item, { x15: 0, x20: 0 });
+          const entry = otProjectRateMap.get(e.project_item)!;
+
+          if (dayOfWeek === 0) {
+            // Sunday — all x2.0
+            entry.x20 += hrs;
+          } else if (dayOfWeek === 6) {
+            // Saturday — tracked globally, attribute per-project proportionally later
+            // For now, all Sat OT goes into x15 bucket; we'll fix the split below
+            entry.x15 += hrs;
+          } else {
+            // Mon-Fri OT — all x1.5
+            entry.x15 += hrs;
+          }
         }
       }
+
+      // Fix Saturday split: redistribute Sat hours across projects proportionally
+      // Total sat x15 = satX15Limit (5h), rest is x2.0
+      if (saturdayHours > satX15Limit && monFriHours >= basicThreshold) {
+        // Gather all Sat OT hours per project
+        const satProjectHours = new Map<string, number>();
+        for (const e of empEntries) {
+          if (e.is_overtime && !["HOLIDAY-01", "SICK-01", "TRAINING-01"].includes(e.project_item)) {
+            const dayOfWeek = new Date(e.work_date + "T00:00:00").getDay();
+            if (dayOfWeek === 6) {
+              satProjectHours.set(e.project_item, (satProjectHours.get(e.project_item) ?? 0) + Number(e.hours));
+            }
+          }
+        }
+        // Proportionally split: first satX15Limit hours at x1.5, rest at x2.0
+        let remaining15 = satX15Limit;
+        for (const [proj, satHrs] of Array.from(satProjectHours.entries()).sort((a, b) => b[1] - a[1])) {
+          const entry = otProjectRateMap.get(proj);
+          if (!entry) continue;
+          // Remove the sat hours we initially put in x15
+          entry.x15 -= satHrs;
+          // Allocate to x1.5 up to remaining limit
+          const asX15 = Math.min(satHrs, remaining15);
+          const asX20 = satHrs - asX15;
+          entry.x15 += asX15;
+          entry.x20 += asX20;
+          remaining15 -= asX15;
+        }
+      }
+
       let otProjects = "";
-      if (otProjectMap.size > 0) {
-        const parts = Array.from(otProjectMap.entries())
-          .sort((a, b) => b[1] - a[1])
-          .map(([proj, hrs]) => `${proj} (${hrs}h)`);
+      if (otProjectRateMap.size > 0) {
+        const parts = Array.from(otProjectRateMap.entries())
+          .sort((a, b) => (b[1].x15 + b[1].x20) - (a[1].x15 + a[1].x20))
+          .map(([proj, rates]) => {
+            const segments: string[] = [];
+            if (rates.x15 > 0) segments.push(`${rates.x15}h @ 1.5x`);
+            if (rates.x20 > 0) segments.push(`${rates.x20}h @ 2x`);
+            return `${proj} (${segments.join(", ")})`;
+          });
         otProjects = "OT: " + parts.join(", ");
       }
 
@@ -335,7 +389,7 @@ export default function WagePrepPage() {
             />
           </div>
           <div className="text-xs text-gray-500">
-            Mon–Fri up to {basicThreshold}h = basic. If met: excess = x1.5, Sat first {satX15Limit}h = x1.5, Sat beyond = x2.0
+            Mon–Fri up to {basicThreshold}h = basic. If met: excess = x1.5, Sat first {satX15Limit}h = x1.5, Sat beyond = x2.0, Sun = x2.0
           </div>
         </div>
       )}
