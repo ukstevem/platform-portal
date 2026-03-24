@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>PSS Crane Inspection QR Labels — P-touch P700</title>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      color: #061b37;
+    }
+    h1 { font-size: 18px; margin-bottom: 4px; }
+    p.sub { font-size: 12px; color: #666; margin-bottom: 20px; }
+    .labels {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+    }
+    .label {
+      border: 1px dashed #ccc;
+      padding: 10px;
+      text-align: center;
+      width: 200px;
+    }
+    .label .code {
+      font-family: monospace;
+      font-size: 11px;
+      font-weight: bold;
+      margin-bottom: 2px;
+    }
+    .label .name {
+      font-size: 10px;
+      color: #555;
+    }
+    .label .doc-name {
+      font-size: 9px;
+      color: #061b37;
+      font-weight: bold;
+      margin-top: 2px;
+    }
+    .label .qr-data {
+      font-family: monospace;
+      font-size: 9px;
+      color: #999;
+      margin-top: 4px;
+    }
+    @media print {
+      body { margin: 0; }
+      h1, p.sub, .instructions { display: none; }
+      .label { border: none; page-break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Crane Inspection QR Labels</h1>
+  <p class="sub">Format: {type_code}|{asset_code}|{doc_code} — For Brother P-touch P700</p>
+
+  <div class="instructions" style="background: #f5f5f5; padding: 12px; margin-bottom: 20px; font-size: 12px; border-radius: 4px;">
+    <strong>P-touch P700:</strong> Insert → Barcode → QR Code → type the data string shown below each label.
+    Or right-click a QR image → "Save image as" → import into P-touch Editor.
+  </div>
+
+  <div class="labels" id="labels"></div>
+
+  <script>
+    const cranes = [
+      { code: 'CRANE-01', name: 'Saw Shop North',    location: 'Bay 1' },
+      { code: 'CRANE-02', name: 'Saw Shop South',    location: 'Bay 1' },
+      { code: 'CRANE-03', name: 'Fab Shop North',    location: 'Bay 2' },
+      { code: 'CRANE-04', name: 'Fab Shop South',    location: 'Bay 2' },
+      { code: 'CRANE-05', name: 'Basket Shop North', location: 'Bay 3' },
+      { code: 'CRANE-06', name: 'Basket Shop South', location: 'Bay 3' },
+    ];
+
+    const inspections = [
+      { docCode: 'WEEKLY-PREUSE',  typeCode: 'HS',   docName: 'Weekly Pre-Use Inspection' },
+      { docCode: 'LOLER-ANNUAL',   typeCode: 'HS',   docName: 'LOLER Thorough Examination' },
+      { docCode: '6M-THOROUGH',    typeCode: 'HS',   docName: '6-Monthly Thorough Exam' },
+      { docCode: 'BRAKE-TEST',     typeCode: 'X-IC', docName: 'Brake Test Certificate' },
+      { docCode: 'LOAD-TEST',      typeCode: 'X-IC', docName: 'Load Test Certificate' },
+    ];
+
+    const container = document.getElementById('labels');
+
+    // Generate one label per crane per inspection type
+    inspections.forEach(insp => {
+      // Section header
+      const header = document.createElement('div');
+      header.style.cssText = 'width: 100%; margin-top: 20px; margin-bottom: 8px; border-bottom: 2px solid #061b37; padding-bottom: 4px;';
+      header.innerHTML = `<strong style="font-size: 14px;">${insp.docName}</strong>
+        <span style="font-size: 11px; color: #666; margin-left: 8px;">${insp.typeCode} / ${insp.docCode}</span>`;
+      container.appendChild(header);
+
+      cranes.forEach(crane => {
+        const qrData = `${insp.typeCode}|${crane.code}|${insp.docCode}`;
+
+        const qr = qrcode(0, 'M');
+        qr.addData(qrData);
+        qr.make();
+
+        const div = document.createElement('div');
+        div.className = 'label';
+
+        const img = document.createElement('img');
+        img.src = qr.createDataURL(5, 4);
+        img.alt = qrData;
+        img.title = 'Right-click → Save image as';
+        img.style.cssText = 'display: block; margin: 0 auto 6px;';
+
+        div.appendChild(img);
+        div.innerHTML += `
+          <div class="code">${crane.code}</div>
+          <div class="name">${crane.name} — ${crane.location}</div>
+          <div class="doc-name">${insp.docName}</div>
+          <div class="qr-data">${qrData}</div>
+        `;
+
+        container.appendChild(div);
+      });
+    });
+  </script>
+</body>
+</html>

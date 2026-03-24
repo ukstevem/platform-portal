@@ -24,6 +24,11 @@ const apps = [
     href: "/operations/",
     description: "Project cost overview combining labour hours, purchase orders, and invoices.",
   },
+  {
+    name: "QR Scanner",
+    href: "/scanner/",
+    description: "Scan QR-coded documents and automatically file them by type.",
+  },
 ];
 
 export default function PortalHome() {

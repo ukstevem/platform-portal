@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     ports:
       - "${GATEWAY_PORT:-3000}:80"
+    volumes:
+      - ${SCANNER_DATA_DIR}:/data/scanner:ro
     depends_on:
       - portal
       - jobcards
@@ -54,3 +56,29 @@ services:
     environment:
       - APP_NAME=operations
       - PORT=3004
+
+  scanner:
+    image: ghcr.io/ukstevem/platform-portal/scanner:latest
+    container_name: platform_scanner
+    restart: unless-stopped
+    environment:
+      - APP_NAME=scanner
+      - PORT=3005
+      - SCANNER_INBOX_DIR=/data/scanner/inbox
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SECRET_KEY}
+    volumes:
+      - ${SCANNER_DATA_DIR}:/data/scanner
+
+  scanner-worker:
+    image: ghcr.io/ukstevem/platform-portal/scanner-worker:latest
+    container_name: platform_scanner_worker
+    restart: unless-stopped
+    environment:
+      - SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SECRET_KEY}
+      - SCANNER_INBOX_DIR=/data/scanner/inbox
+      - SCANNER_FILED_DIR=/data/scanner/filed
+      - POLL_INTERVAL_MS=5000
+    volumes:
+      - ${SCANNER_DATA_DIR}:/data/scanner
+

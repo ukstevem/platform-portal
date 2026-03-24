@@ -27,11 +27,11 @@ docker buildx build \
   docker/nginx/
 
 # Build and push each app
-for APP in portal jobcards documents timesheets; do
+for APP in portal jobcards documents timesheets scanner; do
   echo ""
   echo "--- $APP ---"
 
-  PORT_MAP=("portal:3000" "jobcards:3001" "documents:3002" "timesheets:3003")
+  PORT_MAP=("portal:3000" "jobcards:3001" "documents:3002" "timesheets:3003" "scanner:3005")
   APP_PORT="3000"
   for p in "${PORT_MAP[@]}"; do
     if [[ "$p" == "$APP:"* ]]; then
@@ -52,6 +52,16 @@ for APP in portal jobcards documents timesheets; do
     --push \
     .
 done
+
+# Build and push scanner-worker (standalone service, not a Next.js app)
+echo ""
+echo "--- scanner-worker ---"
+docker buildx build \
+  --platform "$PLATFORM" \
+  -f services/scanner-worker/Dockerfile \
+  -t "$REGISTRY/scanner-worker:latest" \
+  --push \
+  services/scanner-worker/
 
 echo ""
 echo "=== All images pushed to $REGISTRY ==="

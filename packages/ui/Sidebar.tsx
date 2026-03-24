@@ -28,6 +28,7 @@ const PLATFORM_APPS: NavItem[] = [
   { label: "Timesheets", href: "/timesheets/" },
   { label: "Documents", href: "/documents/" },
   { label: "Job Cards", href: "/jobcards/" },
+  { label: "QR Scanner", href: "/scanner/" },
 ];
 
 export function Sidebar({ appLabel, logoSrc, navSections, userSlot }: SidebarProps) {

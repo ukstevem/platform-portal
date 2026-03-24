@@ -1,0 +1,5 @@
+FROM node:20-alpine
+RUN apk add --no-cache poppler-utils python3 make g++
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+WORKDIR /app
+ENV NODE_ENV=development
