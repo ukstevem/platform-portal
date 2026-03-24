@@ -6,7 +6,7 @@ services:
     ports:
       - "${GATEWAY_PORT:-3000}:80"
     volumes:
-      - ${SCANNER_DATA_DIR}:/data/scanner:ro
+      - ${SCANNER_DATA_DIR:-/tmp/scanner}:/data/scanner:ro
     depends_on:
       - portal
       - jobcards
@@ -67,7 +67,7 @@ services:
       - SCANNER_INBOX_DIR=/data/scanner/inbox
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SECRET_KEY}
     volumes:
-      - ${SCANNER_DATA_DIR}:/data/scanner
+      - ${SCANNER_DATA_DIR:-/tmp/scanner}:/data/scanner
 
   scanner-worker:
     image: ghcr.io/ukstevem/platform-portal/scanner-worker:latest
@@ -80,5 +80,5 @@ services:
       - SCANNER_FILED_DIR=/data/scanner/filed
       - POLL_INTERVAL_MS=5000
     volumes:
-      - ${SCANNER_DATA_DIR}:/data/scanner
+      - ${SCANNER_DATA_DIR:-/tmp/scanner}:/data/scanner
 
