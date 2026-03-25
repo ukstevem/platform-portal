@@ -6,7 +6,6 @@ services:
       - "3000:80"
     volumes:
       - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf
-      - scanner_data:/data/scanner:ro
     depends_on:
       - portal
       - jobcards
@@ -140,6 +139,14 @@ services:
       - ./services/scanner-worker:/app
       - scanner_worker_nm:/app/node_modules
       - scanner_data:/data/scanner
+
+  fileserver:
+    image: nginx:1.27-alpine
+    container_name: platform_fileserver
+    restart: unless-stopped
+    volumes:
+      - ./docker/fileserver/default.conf:/etc/nginx/conf.d/default.conf
+      - scanner_data:/data/scanner:ro
 
 volumes:
   portal_pnpm_store:

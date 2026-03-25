@@ -6,7 +6,6 @@ services:
     ports:
       - "${GATEWAY_PORT:-3000}:80"
     volumes:
-      - scanner_data:/data/scanner:ro
     depends_on:
       - portal
       - jobcards
@@ -81,6 +80,13 @@ services:
       - POLL_INTERVAL_MS=5000
     volumes:
       - scanner_data:/data/scanner
+
+  fileserver:
+    image: ghcr.io/ukstevem/platform-portal/fileserver:latest
+    container_name: platform_fileserver
+    restart: unless-stopped
+    volumes:
+      - scanner_data:/data/scanner:ro
 
 volumes:
   scanner_data:

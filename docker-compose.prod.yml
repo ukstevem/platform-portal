@@ -7,8 +7,6 @@ services:
     restart: unless-stopped
     ports:
       - "${GATEWAY_PORT:-3080}:80"
-    volumes:
-      - scanner_data:/data/scanner:ro
     depends_on:
       - portal
       - jobcards
@@ -134,6 +132,15 @@ services:
       - POLL_INTERVAL_MS=5000
     volumes:
       - scanner_data:/data/scanner
+
+  fileserver:
+    build:
+      context: ./docker/fileserver
+      dockerfile: Dockerfile
+    container_name: platform_fileserver
+    restart: unless-stopped
+    volumes:
+      - scanner_data:/data/scanner:ro
 
 volumes:
   scanner_data:
