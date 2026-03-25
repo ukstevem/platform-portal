@@ -29,12 +29,15 @@ export async function POST(req: NextRequest) {
   const storedName = `${id}.${ext}`;
 
   try {
+    console.log(`[upload] SCANNER_INBOX_DIR=${INBOX_DIR}`);
     await mkdir(INBOX_DIR, { recursive: true });
     const bytes = Buffer.from(await file.arrayBuffer());
-    await writeFile(join(INBOX_DIR, storedName), bytes);
+    const fullPath = join(INBOX_DIR, storedName);
+    await writeFile(fullPath, bytes);
+    console.log(`[upload] Written ${bytes.length} bytes to ${fullPath}`);
   } catch (err) {
-    console.error("Failed to save file:", err);
-    return NextResponse.json({ error: "Failed to save file" }, { status: 500 });
+    console.error("[upload] Failed to save file:", err);
+    return NextResponse.json({ error: `Failed to save file: ${err}` }, { status: 500 });
   }
 
   const { error: dbError } = await supabaseAdmin.from("document_incoming_scan").insert({

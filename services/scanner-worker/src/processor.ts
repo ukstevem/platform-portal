@@ -1,5 +1,6 @@
-import { readFile, mkdir, copyFile } from "fs/promises";
+import { readFile, mkdir, copyFile, access } from "fs/promises";
 import { join, extname } from "path";
+import { constants } from "fs";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import sharp from "sharp";
@@ -195,7 +196,19 @@ export async function processJob(
   const inboxPath = join(INBOX_DIR, job.file_path);
   const originalExt = extname(job.file_name).toLowerCase() || ".pdf";
 
-  // 1. Extract first page as image
+  // 1. Wait for file to be available (volume sync delay)
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      await access(inboxPath, constants.R_OK);
+      break;
+    } catch {
+      if (attempt === 9) throw new Error(`File not found after 10 attempts: ${inboxPath}`);
+      console.log(`[worker] Waiting for file ${job.file_path} (attempt ${attempt + 1}/10)`);
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+
+  // 2. Extract first page as image
   const imageBuffer = await getFirstPageImage(inboxPath);
 
   // 2. Read and parse QR code
