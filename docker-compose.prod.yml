@@ -8,7 +8,7 @@ services:
     ports:
       - "${GATEWAY_PORT:-3080}:80"
     volumes:
-      - ${SCANNER_DATA_DIR:-/tmp/scanner}:/data/scanner:ro
+      - scanner_data:/data/scanner:ro
     depends_on:
       - portal
       - jobcards
@@ -118,7 +118,7 @@ services:
       - SCANNER_INBOX_DIR=/data/scanner/inbox
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SECRET_KEY}
     volumes:
-      - ${SCANNER_DATA_DIR:-/tmp/scanner}:/data/scanner
+      - scanner_data:/data/scanner
 
   scanner-worker:
     build:
@@ -133,5 +133,7 @@ services:
       - SCANNER_FILED_DIR=/data/scanner/filed
       - POLL_INTERVAL_MS=5000
     volumes:
-      - ${SCANNER_DATA_DIR:-/tmp/scanner}:/data/scanner
+      - scanner_data:/data/scanner
 
+volumes:
+  scanner_data:
