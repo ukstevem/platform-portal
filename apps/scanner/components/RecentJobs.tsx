@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { supabase } from "@platform/supabase/client";
 import { StatusBadge } from "./StatusBadge";
 
+const DOC_SERVICE_URL = process.env.NEXT_PUBLIC_DOC_SERVICE_URL ?? "";
+
 type ScanJob = {
   id: string;
   file_name: string;
@@ -73,7 +75,7 @@ export function RecentJobs() {
                 <td className="py-2 pr-4 font-mono text-xs truncate max-w-48" title={job.filed_path ?? undefined}>
                   {job.filed_path ? (
                     <a
-                      href={`/files/scanner/${job.filed_path}`}
+                      href={`${DOC_SERVICE_URL}/files/scanner/${job.filed_path}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-blue-600 hover:underline"

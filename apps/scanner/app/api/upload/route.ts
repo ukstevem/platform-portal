@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
-import { writeFile, mkdir } from "fs/promises";
-import { join } from "path";
 
-const INBOX_DIR = process.env.SCANNER_INBOX_DIR ?? "/data/scanner/inbox";
+const DOC_SERVICE_URL = process.env.DOC_SERVICE_URL ?? "http://localhost:8080";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
@@ -28,18 +26,29 @@ export async function POST(req: NextRequest) {
   const id = randomUUID();
   const storedName = `${id}.${ext}`;
 
+  // Upload file to document service
   try {
-    console.log(`[upload] SCANNER_INBOX_DIR=${INBOX_DIR}`);
-    await mkdir(INBOX_DIR, { recursive: true });
-    const bytes = Buffer.from(await file.arrayBuffer());
-    const fullPath = join(INBOX_DIR, storedName);
-    await writeFile(fullPath, bytes);
-    console.log(`[upload] Written ${bytes.length} bytes to ${fullPath}`);
+    const uploadForm = new FormData();
+    uploadForm.append("file", file, storedName);
+
+    const res = await fetch(`${DOC_SERVICE_URL}/upload/scanner/inbox/`, {
+      method: "POST",
+      body: uploadForm,
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      console.error(`[upload] Document service error: ${res.status} ${text}`);
+      return NextResponse.json({ error: "Failed to upload file to document service" }, { status: 502 });
+    }
+
+    console.log(`[upload] Sent ${file.name} to document service as ${storedName}`);
   } catch (err) {
-    console.error("[upload] Failed to save file:", err);
-    return NextResponse.json({ error: `Failed to save file: ${err}` }, { status: 500 });
+    console.error("[upload] Failed to reach document service:", err);
+    return NextResponse.json({ error: `Document service unavailable: ${err}` }, { status: 502 });
   }
 
+  // Create scan job in Supabase
   const { error: dbError } = await supabaseAdmin.from("document_incoming_scan").insert({
     id,
     file_name: file.name,

@@ -108,39 +108,11 @@ services:
         NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
         NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
         NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+        NEXT_PUBLIC_DOC_SERVICE_URL: ${NEXT_PUBLIC_DOC_SERVICE_URL}
     container_name: platform_scanner
     restart: unless-stopped
     environment:
       - APP_NAME=scanner
       - PORT=3005
-      - SCANNER_INBOX_DIR=/data/scanner/inbox
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SECRET_KEY}
-    volumes:
-      - scanner_data:/data/scanner
-
-  scanner-worker:
-    build:
-      context: ./services/scanner-worker
-      dockerfile: Dockerfile
-    container_name: platform_scanner_worker
-    restart: unless-stopped
-    environment:
-      - SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
-      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SECRET_KEY}
-      - SCANNER_INBOX_DIR=/data/scanner/inbox
-      - SCANNER_FILED_DIR=/data/scanner/filed
-      - POLL_INTERVAL_MS=5000
-    volumes:
-      - scanner_data:/data/scanner
-
-  fileserver:
-    build:
-      context: ./docker/fileserver
-      dockerfile: Dockerfile
-    container_name: platform_fileserver
-    restart: unless-stopped
-    volumes:
-      - scanner_data:/data/scanner:ro
-
-volumes:
-  scanner_data:
+      - DOC_SERVICE_URL=${DOC_SERVICE_URL:-http://10.0.0.x:80}

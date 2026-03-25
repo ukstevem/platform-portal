@@ -1,5 +1,7 @@
 "use client";
 
+const DOC_SERVICE_URL = process.env.NEXT_PUBLIC_DOC_SERVICE_URL ?? "";
+
 import { useEffect, useState } from "react";
 import { useAuth } from "@platform/auth/AuthProvider";
 import { AuthButton } from "@platform/auth/AuthButton";
@@ -85,7 +87,7 @@ export default function HistoryPage() {
                   <td className="py-2 pr-4 font-mono text-xs truncate max-w-64" title={job.filed_path ?? undefined}>
                     {job.filed_path ? (
                       <a
-                        href={`/files/scanner/${job.filed_path}`}
+                        href={`${DOC_SERVICE_URL}/files/scanner/${job.filed_path}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-blue-600 hover:underline"

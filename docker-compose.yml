@@ -108,7 +108,6 @@ services:
     working_dir: /repo
     env_file: .env
     environment:
-      SCANNER_INBOX_DIR: /data/scanner/inbox
       WATCHPACK_POLLING: "true"
     command:
       ["sh", "-lc", "corepack enable && corepack prepare pnpm@9.15.0 --activate && pnpm install && pnpm -C apps/scanner dev --hostname 0.0.0.0 --port 3005"]
@@ -117,36 +116,6 @@ services:
       - scanner_pnpm_store:/repo/.pnpm-store
       - scanner_root_nm:/repo/node_modules
       - scanner_node_modules:/repo/apps/scanner/node_modules
-      - scanner_data:/data/scanner
-
-  scanner-worker:
-    build:
-      context: ./services/scanner-worker
-      dockerfile: Dockerfile.dev
-    container_name: platform_scanner_worker
-    restart: unless-stopped
-    env_file: .env
-    environment:
-      SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
-      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SECRET_KEY}
-      SCANNER_INBOX_DIR: /data/scanner/inbox
-      SCANNER_FILED_DIR: /data/scanner/filed
-      POLL_INTERVAL_MS: "5000"
-    working_dir: /app
-    command:
-      ["sh", "-lc", "corepack enable && corepack prepare pnpm@9.15.0 --activate && pnpm install && pnpm dev"]
-    volumes:
-      - ./services/scanner-worker:/app
-      - scanner_worker_nm:/app/node_modules
-      - scanner_data:/data/scanner
-
-  fileserver:
-    image: nginx:1.27-alpine
-    container_name: platform_fileserver
-    restart: unless-stopped
-    volumes:
-      - ./docker/fileserver/default.conf:/etc/nginx/conf.d/default.conf
-      - scanner_data:/data/scanner:ro
 
 volumes:
   portal_pnpm_store:
@@ -167,5 +136,3 @@ volumes:
   scanner_pnpm_store:
   scanner_root_nm:
   scanner_node_modules:
-  scanner_worker_nm:
-  scanner_data:

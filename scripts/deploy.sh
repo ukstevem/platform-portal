@@ -53,25 +53,6 @@ for APP in portal jobcards documents timesheets scanner; do
     .
 done
 
-# Build and push fileserver (nginx static file server)
-echo ""
-echo "--- fileserver ---"
-docker buildx build \
-  --platform "$PLATFORM" \
-  -f docker/fileserver/Dockerfile \
-  -t "$REGISTRY/fileserver:latest" \
-  --push \
-  docker/fileserver/
-
-# Build and push scanner-worker (standalone service, not a Next.js app)
-echo ""
-echo "--- scanner-worker ---"
-docker buildx build \
-  --platform "$PLATFORM" \
-  -f services/scanner-worker/Dockerfile \
-  -t "$REGISTRY/scanner-worker:latest" \
-  --push \
-  services/scanner-worker/
 
 echo ""
 echo "=== All images pushed to $REGISTRY ==="
