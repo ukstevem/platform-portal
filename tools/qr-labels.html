@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>PSS Crane Inspection QR Labels — P-touch P700</title>
+  <title>PSS HSE QR Labels — P-touch P700</title>
   <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
   <style>
     body {
@@ -12,10 +12,19 @@
     }
     h1 { font-size: 18px; margin-bottom: 4px; }
     p.sub { font-size: 12px; color: #666; margin-bottom: 20px; }
+    .section-header {
+      width: 100%;
+      margin-top: 30px;
+      margin-bottom: 10px;
+      border-bottom: 2px solid #061b37;
+      padding-bottom: 4px;
+    }
+    .section-header strong { font-size: 14px; }
+    .section-header span { font-size: 11px; color: #666; margin-left: 8px; }
     .labels {
       display: flex;
       flex-wrap: wrap;
-      gap: 20px;
+      gap: 16px;
     }
     .label {
       border: 1px dashed #ccc;
@@ -45,15 +54,21 @@
       color: #999;
       margin-top: 4px;
     }
+    .note {
+      font-size: 11px;
+      color: #888;
+      font-style: italic;
+      margin: 8px 0;
+    }
     @media print {
       body { margin: 0; }
-      h1, p.sub, .instructions { display: none; }
+      h1, p.sub, .instructions, .note { display: none; }
       .label { border: none; page-break-inside: avoid; }
     }
   </style>
 </head>
 <body>
-  <h1>Crane Inspection QR Labels</h1>
+  <h1>PSS Health & Safety QR Labels</h1>
   <p class="sub">Format: {type_code}|{asset_code}|{doc_code} — For Brother P-touch P700</p>
 
   <div class="instructions" style="background: #f5f5f5; padding: 12px; margin-bottom: 20px; font-size: 12px; border-radius: 4px;">
@@ -64,61 +79,104 @@
   <div class="labels" id="labels"></div>
 
   <script>
-    const cranes = [
-      { code: 'CRANE-01', name: 'Saw Shop North',    location: 'Bay 1' },
-      { code: 'CRANE-02', name: 'Saw Shop South',    location: 'Bay 1' },
-      { code: 'CRANE-03', name: 'Fab Shop North',    location: 'Bay 2' },
-      { code: 'CRANE-04', name: 'Fab Shop South',    location: 'Bay 2' },
-      { code: 'CRANE-05', name: 'Basket Shop North', location: 'Bay 3' },
-      { code: 'CRANE-06', name: 'Basket Shop South', location: 'Bay 3' },
-    ];
-
-    const inspections = [
-      { docCode: 'WEEKLY-PREUSE',  typeCode: 'HS',   docName: 'Weekly Pre-Use Inspection' },
-      { docCode: 'LOLER-ANNUAL',   typeCode: 'HS',   docName: 'LOLER Thorough Examination' },
-      { docCode: '6M-THOROUGH',    typeCode: 'HS',   docName: '6-Monthly Thorough Exam' },
-      { docCode: 'BRAKE-TEST',     typeCode: 'X-IC', docName: 'Brake Test Certificate' },
-      { docCode: 'LOAD-TEST',      typeCode: 'X-IC', docName: 'Load Test Certificate' },
-    ];
-
     const container = document.getElementById('labels');
 
-    // Generate one label per crane per inspection type
-    inspections.forEach(insp => {
-      // Section header
+    function addSection(title, subtitle) {
       const header = document.createElement('div');
-      header.style.cssText = 'width: 100%; margin-top: 20px; margin-bottom: 8px; border-bottom: 2px solid #061b37; padding-bottom: 4px;';
-      header.innerHTML = `<strong style="font-size: 14px;">${insp.docName}</strong>
-        <span style="font-size: 11px; color: #666; margin-left: 8px;">${insp.typeCode} / ${insp.docCode}</span>`;
+      header.className = 'section-header';
+      header.innerHTML = `<strong>${title}</strong><span>${subtitle}</span>`;
       container.appendChild(header);
+    }
 
-      cranes.forEach(crane => {
-        const qrData = `${insp.typeCode}|${crane.code}|${insp.docCode}`;
+    function addNote(text) {
+      const note = document.createElement('div');
+      note.className = 'note';
+      note.textContent = text;
+      container.appendChild(note);
+    }
 
-        const qr = qrcode(0, 'M');
-        qr.addData(qrData);
-        qr.make();
+    function addLabel(assetCode, assetName, location, docCode, docName, typeCode) {
+      const qrData = `${typeCode}|${assetCode}|${docCode}`;
+      const qr = qrcode(0, 'M');
+      qr.addData(qrData);
+      qr.make();
 
-        const div = document.createElement('div');
-        div.className = 'label';
+      const div = document.createElement('div');
+      div.className = 'label';
 
-        const img = document.createElement('img');
-        img.src = qr.createDataURL(5, 4);
-        img.alt = qrData;
-        img.title = 'Right-click → Save image as';
-        img.style.cssText = 'display: block; margin: 0 auto 6px;';
+      const img = document.createElement('img');
+      img.src = qr.createDataURL(5, 4);
+      img.alt = qrData;
+      img.title = 'Right-click → Save image as';
+      img.style.cssText = 'display: block; margin: 0 auto 6px;';
 
-        div.appendChild(img);
-        div.innerHTML += `
-          <div class="code">${crane.code}</div>
-          <div class="name">${crane.name} — ${crane.location}</div>
-          <div class="doc-name">${insp.docName}</div>
-          <div class="qr-data">${qrData}</div>
-        `;
+      div.appendChild(img);
+      div.innerHTML += `
+        <div class="code">${assetCode}</div>
+        <div class="name">${assetName}${location ? ' — ' + location : ''}</div>
+        <div class="doc-name">${docName}</div>
+        <div class="qr-data">${qrData}</div>
+      `;
+      container.appendChild(div);
+    }
 
-        container.appendChild(div);
-      });
+    // ─── CRANES ───
+    addSection('Crane Weekly Pre-Use Inspection', 'HS / WEEKLY-PREUSE');
+    const cranes = [
+      ['CRN-01', 'Saw Shop North',    'Bay 1'],
+      ['CRN-02', 'Saw Shop South',    'Bay 1'],
+      ['CRN-03', 'Fab Shop North',    'Bay 2'],
+      ['CRN-04', 'Fab Shop South',    'Bay 2'],
+      ['CRN-05', 'Basket Shop North', 'Bay 3'],
+      ['CRN-06', 'Basket Shop South', 'Bay 3'],
+    ];
+    cranes.forEach(([code, name, loc]) => addLabel(code, name, loc, 'WEEKLY-PREUSE', 'Weekly Pre-Use Inspection', 'HS'));
+
+    // ─── WEEKLY SAFETY WALKROUND ───
+    addSection('Weekly Safety Inspection (Site Walkround)', 'HS / WEEKLY-SAFETY');
+    addLabel('SITE', 'Whole Site', 'PSS', 'WEEKLY-SAFETY', 'Weekly Safety Inspection', 'HS');
+
+    // ─── FLTs ───
+    addSection('FLT Weekly Pre-Use Check', 'HS / FLT-PREUSE');
+    addLabel('FLT-CAT-01', 'CAT Forklift 1', 'Yard', 'FLT-PREUSE', 'FLT Weekly Pre-Use Check', 'HS');
+    addLabel('FLT-HYSTER-01', 'Hyster Forklift 1', 'Yard', 'FLT-PREUSE', 'FLT Weekly Pre-Use Check', 'HS');
+
+    // ─── FIRE EXTINGUISHERS ───
+    addSection('Fire Extinguisher Weekly Check', 'HS / FEX-WEEKLY');
+    addNote('34 extinguishers — FEX-01 through FEX-34. Print one label per extinguisher.');
+    for (let i = 1; i <= 34; i++) {
+      const code = 'FEX-' + String(i).padStart(2, '0');
+      addLabel(code, `Fire Extinguisher ${i}`, null, 'FEX-WEEKLY', 'Fire Extinguisher Weekly Check', 'HS');
+    }
+
+    // ─── MACHINES ───
+    addSection('Machine Pre-Op Check', 'HS / MCH-PREOP');
+    addNote('Update asset names in Supabase once machines are identified.');
+    for (let i = 1; i <= 5; i++) {
+      const code = 'MCH-' + String(i).padStart(2, '0');
+      addLabel(code, `Machine ${i}`, null, 'MCH-PREOP', 'Machine Pre-Op Check', 'HS');
+    }
+
+    // ─── VEHICLES ───
+    addSection('Weekly Vehicle Check', 'HS / VEH-WEEKLY');
+    addNote('Add vehicles to asset_register as VEH-{REG}, e.g. VEH-AB12CDE. Then generate labels below.');
+    addNote('Example labels — replace with real registrations:');
+    ['VEH-AB12CDE', 'VEH-XY34FGH'].forEach(code => {
+      addLabel(code, code.replace('VEH-', ''), null, 'VEH-WEEKLY', 'Weekly Vehicle Check', 'HS');
     });
+
+    // ─── HAVS ───
+    addSection('HAVS Disc Usage Record', 'HS / HAVS-WEEKLY');
+    addNote('Per employee — add employees to asset_register as e.g. EMP-JSMITH. One label per person.');
+    addNote('Example labels — replace with real employee codes:');
+    ['EMP-JSMITH', 'EMP-ABLOGS'].forEach(code => {
+      addLabel(code, code.replace('EMP-', '').replace(/([A-Z])/g, ' $1').trim(), null, 'HAVS-WEEKLY', 'HAVS Disc Usage Record', 'HS');
+    });
+
+    // ─── CONTRACTOR INDUCTION ───
+    addSection('Contractor Induction', 'HS / CONTRACTOR-INDUCT');
+    addNote('Per contractor — no fixed asset. Use a generic label or create per-contractor labels as needed.');
+    addLabel('SITE', 'Contractor Induction', 'PSS', 'CONTRACTOR-INDUCT', 'Contractor Induction', 'HS');
   </script>
 </body>
 </html>
