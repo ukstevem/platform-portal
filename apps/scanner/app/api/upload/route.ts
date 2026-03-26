@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
     const uploadForm = new FormData();
     uploadForm.append("file", file, storedName);
 
-    const res = await fetch(`${DOC_SERVICE_URL}/upload/scanner/inbox/`, {
+    const res = await fetch(`${DOC_SERVICE_URL}/api/scan/upload`, {
       method: "POST",
       body: uploadForm,
     });
