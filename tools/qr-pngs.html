@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>PSS QR Code PNG Generator</title>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; color: #061b37; }
+    h1 { font-size: 18px; }
+    .controls { margin: 16px 0; display: flex; gap: 12px; align-items: center; }
+    .controls button {
+      padding: 8px 16px; font-size: 13px; cursor: pointer;
+      background: #061b37; color: white; border: none; border-radius: 4px;
+    }
+    .controls button:hover { background: #0a2d5c; }
+    .section { margin-top: 24px; border-bottom: 2px solid #061b37; padding-bottom: 4px; margin-bottom: 12px; }
+    .section strong { font-size: 14px; }
+    .section span { font-size: 11px; color: #666; margin-left: 8px; }
+    .grid { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; }
+    .card {
+      border: 1px solid #ddd; padding: 8px; text-align: center; width: 180px;
+      border-radius: 4px; background: white;
+    }
+    .card canvas { display: block; margin: 0 auto 4px; }
+    .card .code { font-family: monospace; font-size: 10px; font-weight: bold; }
+    .card .name { font-size: 9px; color: #555; margin: 2px 0; }
+    .card .qr-data { font-family: monospace; font-size: 8px; color: #999; }
+    .card a {
+      display: inline-block; margin-top: 4px; font-size: 10px;
+      color: #061b37; text-decoration: underline; cursor: pointer;
+    }
+    .status { font-size: 12px; color: #666; }
+  </style>
+</head>
+<body>
+  <h1>PSS QR Code PNG Generator</h1>
+  <div class="controls">
+    <button onclick="downloadAll()">Download All PNGs</button>
+    <span class="status" id="status"></span>
+  </div>
+  <div id="output"></div>
+
+  <script>
+    const output = document.getElementById('output');
+    const allLabels = [];
+
+    function addSection(title, subtitle) {
+      const div = document.createElement('div');
+      div.className = 'section';
+      div.innerHTML = `<strong>${title}</strong><span>${subtitle}</span>`;
+      output.appendChild(div);
+      const grid = document.createElement('div');
+      grid.className = 'grid';
+      output.appendChild(grid);
+      return grid;
+    }
+
+    function addQR(grid, assetCode, assetName, docCode, docName, typeCode) {
+      const qrData = `${typeCode}|${assetCode}|${docCode}`;
+      const filename = `${assetCode}_${typeCode}_${docCode}.png`;
+
+      const qr = qrcode(0, 'M');
+      qr.addData(qrData);
+      qr.make();
+
+      // Create high-res canvas with space for text label
+      const moduleCount = qr.getModuleCount();
+      const cellSize = 10;
+      const margin = 40;
+      const qrSize = moduleCount * cellSize + margin * 2;
+      const textHeight = 60;
+      const canvas = document.createElement('canvas');
+      canvas.width = qrSize;
+      canvas.height = qrSize + textHeight;
+      const ctx = canvas.getContext('2d');
+
+      // White background
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Draw QR modules
+      ctx.fillStyle = '#000000';
+      for (let row = 0; row < moduleCount; row++) {
+        for (let col = 0; col < moduleCount; col++) {
+          if (qr.isDark(row, col)) {
+            ctx.fillRect(margin + col * cellSize, margin + row * cellSize, cellSize, cellSize);
+          }
+        }
+      }
+
+      // Draw asset code (bold, larger)
+      ctx.fillStyle = '#000000';
+      ctx.font = 'bold 18px Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(assetCode, qrSize / 2, qrSize + 22);
+
+      // Draw doc code (smaller, grey)
+      ctx.fillStyle = '#666666';
+      ctx.font = '14px Arial, sans-serif';
+      ctx.fillText(docCode, qrSize / 2, qrSize + 44);
+
+      // Store for batch download
+      allLabels.push({ canvas, filename, qrData, assetCode, docCode });
+
+      // Display card
+      const card = document.createElement('div');
+      card.className = 'card';
+
+      const preview = document.createElement('canvas');
+      preview.width = 120;
+      preview.height = 140;
+      const pctx = preview.getContext('2d');
+      pctx.drawImage(canvas, 0, 0, canvas.width, canvas.height, 0, 0, 120, 140);
+
+      card.appendChild(preview);
+      card.innerHTML += `
+        <div class="code">${assetCode}</div>
+        <div class="name">${assetName}</div>
+        <div class="qr-data">${qrData}</div>
+      `;
+
+      const link = document.createElement('a');
+      link.textContent = 'Download PNG';
+      link.onclick = () => downloadOne(canvas, filename);
+      card.appendChild(link);
+
+      grid.appendChild(card);
+    }
+
+    function downloadOne(canvas, filename) {
+      const a = document.createElement('a');
+      a.download = filename;
+      a.href = canvas.toDataURL('image/png');
+      a.click();
+    }
+
+    async function downloadAll() {
+      const status = document.getElementById('status');
+      status.textContent = `Zipping ${allLabels.length} PNGs...`;
+      const zip = new JSZip();
+      for (let i = 0; i < allLabels.length; i++) {
+        const { canvas, filename } = allLabels[i];
+        const dataUrl = canvas.toDataURL('image/png');
+        const base64 = dataUrl.split(',')[1];
+        zip.file(filename, base64, { base64: true });
+        status.textContent = `Zipping ${i + 1} of ${allLabels.length}...`;
+      }
+      status.textContent = 'Generating zip file...';
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const a = document.createElement('a');
+      a.download = 'PSS-QR-Labels.zip';
+      a.href = URL.createObjectURL(blob);
+      a.click();
+      URL.revokeObjectURL(a.href);
+      status.textContent = `Done — ${allLabels.length} PNGs saved to PSS-QR-Labels.zip`;
+    }
+
+    const cranes = [
+      ['MCH-CRN-001', 'Saw Shop North — Bay 1'],
+      ['MCH-CRN-002', 'Saw Shop South — Bay 1'],
+      ['MCH-CRN-003', 'Fab Shop North — Bay 2'],
+      ['MCH-CRN-004', 'Fab Shop South — Bay 2'],
+      ['MCH-CRN-005', 'Basket Shop North — Bay 3'],
+      ['MCH-CRN-006', 'Basket Shop South — Bay 3'],
+    ];
+
+    // ─── CRANES ───
+    let grid = addSection('Crane Weekly Pre-Use Inspection', 'HS / WEEKLY-PREUSE');
+    cranes.forEach(([c, n]) => addQR(grid, c, n, 'WEEKLY-PREUSE', 'Weekly Pre-Use Inspection', 'HS'));
+
+    grid = addSection('Crane LOLER Thorough Examination', 'HS / LOLER-ANNUAL');
+    cranes.forEach(([c, n]) => addQR(grid, c, n, 'LOLER-ANNUAL', 'LOLER Thorough Examination', 'HS'));
+
+    grid = addSection('Crane 6-Monthly Thorough Exam', 'HS / 6M-THOROUGH');
+    cranes.forEach(([c, n]) => addQR(grid, c, n, '6M-THOROUGH', '6-Monthly Thorough Exam', 'HS'));
+
+    // ─── WEEKLY SAFETY ───
+    grid = addSection('Weekly Safety Inspection', 'HS / WEEKLY-SAFETY');
+    addQR(grid, 'HS-SIT-001', 'Weekly Safety Inspection — PSS', 'WEEKLY-SAFETY', 'Weekly Safety Inspection', 'HS');
+
+    // ─── FLTs ───
+    grid = addSection('FLT Weekly Pre-Use Check', 'HS / FLT-PREUSE');
+    addQR(grid, 'VEH-FLT-001', 'CAT Forklift — Yard', 'FLT-PREUSE', 'FLT Weekly Pre-Use Check', 'HS');
+    addQR(grid, 'VEH-FLT-002', 'Hyster Forklift — Yard', 'FLT-PREUSE', 'FLT Weekly Pre-Use Check', 'HS');
+
+    // ─── FIRE EXTINGUISHERS (one form for all) ───
+    grid = addSection('Fire Extinguisher Weekly Check', 'HS / FEX-WEEKLY');
+    addQR(grid, 'HS-FEX-001', 'Fire Extinguisher Weekly Check', 'FEX-WEEKLY', 'Fire Extinguisher Weekly Check', 'HS');
+
+    // ─── MACHINES ───
+    grid = addSection('Machine Pre-Op Check', 'HS / MCH-PREOP');
+    [
+      ['MCH-DRL-001', 'Drill Line'],
+      ['MCH-GRN-001', 'Pedestal Grinder'],
+      ['MCH-PRB-001', 'Press Brake'],
+      ['MCH-GIL-001', 'Guillotine'],
+      ['MCH-SAW-001', 'Band Saw 1'],
+      ['MCH-SAW-002', 'Band Saw 2'],
+    ].forEach(([c, n]) => addQR(grid, c, n, 'MCH-PREOP', 'Machine Pre-Op Check', 'HS'));
+
+    // ─── VEHICLES ───
+    grid = addSection('Weekly Vehicle Check — Vans', 'HS / VEH-WEEKLY');
+    for (let i = 1; i <= 4; i++) {
+      const code = 'VEH-VAN-' + String(i).padStart(3, '0');
+      addQR(grid, code, `Van ${i}`, 'VEH-WEEKLY', 'Weekly Vehicle Check', 'HS');
+    }
+
+    grid = addSection('Weekly Vehicle Check — Pickups', 'HS / VEH-WEEKLY');
+    for (let i = 1; i <= 4; i++) {
+      const code = 'VEH-UTE-' + String(i).padStart(3, '0');
+      addQR(grid, code, `Pickup ${i}`, 'VEH-WEEKLY', 'Weekly Vehicle Check', 'HS');
+    }
+
+    // ─── ADVERSE EVENT ───
+    grid = addSection('Adverse Event Investigation', 'HS / AEI');
+    addQR(grid, 'HS-AEI-001', 'Adverse Event Investigation', 'AEI', 'Adverse Event Investigation', 'HS');
+
+    // ─── HAVS ───
+    grid = addSection('HAVS Disc Usage Record', 'HS / HAVS-WEEKLY');
+    addQR(grid, 'HS-HAV-001', 'HAVS Disc Usage Record', 'HAVS-WEEKLY', 'HAVS Disc Usage Record', 'HS');
+
+    // ─── CONTRACTOR INDUCTION ───
+    grid = addSection('Contractor Induction', 'HS / CONTRACTOR-INDUCT');
+    addQR(grid, 'HS-CON-001', 'Contractor Induction', 'CONTRACTOR-INDUCT', 'Contractor Induction', 'HS');
+
+    // ─── Status ───
+    document.getElementById('status').textContent = `${allLabels.length} QR codes generated. Click "Download All" or download individually.`;
+  </script>
+</body>
+</html>
