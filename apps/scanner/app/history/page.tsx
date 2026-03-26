@@ -193,13 +193,13 @@ export default function HistoryPage() {
                   <td className="py-1 pr-4">
                     {job.thumbnail_path ? (
                       <a
-                        href={job.filed_path ? `${DOC_SERVICE_URL}/files/scanner/${job.filed_path}` : undefined}
+                        href={job.filed_path ? `${DOC_SERVICE_URL}${job.filed_path}` : undefined}
                         target="_blank"
                         rel="noopener noreferrer"
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                          src={`${DOC_SERVICE_URL}/files/scanner/${job.thumbnail_path}`}
+                          src={`${DOC_SERVICE_URL}${job.thumbnail_path}`}
                           alt={job.file_name}
                           className="w-12 h-16 object-cover rounded border border-gray-200"
                         />
@@ -222,7 +222,7 @@ export default function HistoryPage() {
                   <td className="py-2 pr-4 font-mono text-xs truncate max-w-64" title={job.filed_path ?? undefined}>
                     {job.filed_path ? (
                       <a
-                        href={`${DOC_SERVICE_URL}/files/scanner/${job.filed_path}`}
+                        href={`${DOC_SERVICE_URL}${job.filed_path}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-blue-600 hover:underline"
