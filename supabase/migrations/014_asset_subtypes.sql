@@ -106,7 +106,7 @@ UPDATE document_incoming_scan SET asset_code = 'VEH-FLT-002' WHERE asset_code IN
 
 -- ─── HSE site-level forms ───
 INSERT INTO asset_register (asset_code, asset_name, category, location) VALUES
-  ('HS-SIT-001', 'Weekly Safety Inspection',       'hse-form', 'PSS'),
+  ('HS-CAR-001', 'Weekly Safety Inspection',       'hse-form', 'PSS'),
   ('HS-FEX-001', 'Fire Extinguisher Weekly Check',  'hse-form', 'PSS'),
   ('HS-HAV-001', 'HAVS Disc Usage Record',          'hse-form', 'PSS'),
   ('HS-CON-001', 'Contractor Induction',            'hse-form', 'PSS'),

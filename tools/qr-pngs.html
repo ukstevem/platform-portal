@@ -137,23 +137,14 @@
 
     async function downloadAll() {
       const status = document.getElementById('status');
-      status.textContent = `Zipping ${allLabels.length} PNGs...`;
-      const zip = new JSZip();
+      status.textContent = `Downloading ${allLabels.length} PNGs...`;
       for (let i = 0; i < allLabels.length; i++) {
         const { canvas, filename } = allLabels[i];
-        const dataUrl = canvas.toDataURL('image/png');
-        const base64 = dataUrl.split(',')[1];
-        zip.file(filename, base64, { base64: true });
-        status.textContent = `Zipping ${i + 1} of ${allLabels.length}...`;
+        downloadOne(canvas, filename);
+        await new Promise(r => setTimeout(r, 500));
+        status.textContent = `Downloaded ${i + 1} of ${allLabels.length}... (allow popups if Chrome blocks)`;
       }
-      status.textContent = 'Generating zip file...';
-      const blob = await zip.generateAsync({ type: 'blob' });
-      const a = document.createElement('a');
-      a.download = 'PSS-QR-Labels.zip';
-      a.href = URL.createObjectURL(blob);
-      a.click();
-      URL.revokeObjectURL(a.href);
-      status.textContent = `Done — ${allLabels.length} PNGs saved to PSS-QR-Labels.zip`;
+      status.textContent = `Done — ${allLabels.length} PNGs downloaded.`;
     }
 
     const cranes = [
@@ -177,7 +168,7 @@
 
     // ─── WEEKLY SAFETY ───
     grid = addSection('Weekly Safety Inspection', 'HS / WEEKLY-SAFETY');
-    addQR(grid, 'HS-SIT-001', 'Weekly Safety Inspection — PSS', 'WEEKLY-SAFETY', 'Weekly Safety Inspection', 'HS');
+    addQR(grid, 'HS-CAR-001', 'Weekly Safety Inspection — PSS', 'WEEKLY-SAFETY', 'Weekly Safety Inspection', 'HS');
 
     // ─── FLTs ───
     grid = addSection('FLT Weekly Pre-Use Check', 'HS / FLT-PREUSE');
