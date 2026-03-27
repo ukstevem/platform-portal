@@ -48,6 +48,7 @@ for APP in portal jobcards documents timesheets scanner; do
     --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY="${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}" \
     --build-arg NEXT_PUBLIC_DOC_GATEWAY_BASE_URL="${NEXT_PUBLIC_DOC_GATEWAY_BASE_URL:-}" \
     --build-arg NEXT_PUBLIC_APP_URL="${NEXT_PUBLIC_APP_URL:-}" \
+    --build-arg NEXT_PUBLIC_DOC_SERVICE_URL="${NEXT_PUBLIC_DOC_SERVICE_URL:-}" \
     -t "$REGISTRY/$APP:latest" \
     --push \
     .
