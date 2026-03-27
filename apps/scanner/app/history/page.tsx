@@ -8,6 +8,8 @@ import { AuthButton } from "@platform/auth/AuthButton";
 import { PageHeader } from "@platform/ui";
 import { supabase } from "@platform/supabase/client";
 import { StatusBadge } from "@/components/StatusBadge";
+import { LifecycleDialog } from "@/components/LifecycleDialog";
+import { RefileDialog } from "@/components/RefileDialog";
 
 type ScanJob = {
   id: string;
@@ -21,6 +23,7 @@ type ScanJob = {
   filed_path: string | null;
   error_code: string | null;
   error_message: string | null;
+  lifecycle_status: string | null;
   created_at: string;
 };
 
@@ -34,7 +37,10 @@ export default function HistoryPage() {
   const [assetFilter, setAssetFilter] = useState("");
   const [docFilter, setDocFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [lifecycleFilter, setLifecycleFilter] = useState("active");
   const [search, setSearch] = useState("");
+  const [lifecycleJob, setLifecycleJob] = useState<ScanJob | null>(null);
+  const [refileJob, setRefileJob] = useState<ScanJob | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -76,6 +82,7 @@ export default function HistoryPage() {
       if (assetFilter && j.asset_code !== assetFilter) return false;
       if (docFilter && j.doc_code !== docFilter) return false;
       if (statusFilter && j.status !== statusFilter) return false;
+      if (lifecycleFilter && (j.lifecycle_status ?? "active") !== lifecycleFilter) return false;
       if (search) {
         const q = search.toLowerCase();
         const searchable = [
@@ -86,9 +93,18 @@ export default function HistoryPage() {
       }
       return true;
     });
-  }, [jobs, typeFilter, assetFilter, docFilter, statusFilter, search]);
+  }, [jobs, typeFilter, assetFilter, docFilter, statusFilter, lifecycleFilter, search]);
 
-  const hasActiveFilters = typeFilter || assetFilter || docFilter || statusFilter || search;
+  const hasActiveFilters = typeFilter || assetFilter || docFilter || statusFilter || lifecycleFilter !== "active" || search;
+
+  const refetchJobs = () => {
+    supabase
+      .from("document_incoming_scan")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(500)
+      .then(({ data }) => setJobs(data ?? []));
+  };
 
   if (authLoading) return <div className="p-6 text-gray-500">Loading...</div>;
   if (!user) {
@@ -153,9 +169,20 @@ export default function HistoryPage() {
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
+        <select
+          value={lifecycleFilter}
+          onChange={(e) => setLifecycleFilter(e.target.value)}
+          className="border rounded px-3 py-1.5 text-sm"
+        >
+          <option value="">All lifecycle</option>
+          <option value="active">Active</option>
+          <option value="superseded">Superseded</option>
+          <option value="deactivated">Deactivated</option>
+          <option value="archived">Archived</option>
+        </select>
         {hasActiveFilters && (
           <button
-            onClick={() => { setTypeFilter(""); setAssetFilter(""); setDocFilter(""); setStatusFilter(""); setSearch(""); }}
+            onClick={() => { setTypeFilter(""); setAssetFilter(""); setDocFilter(""); setStatusFilter(""); setLifecycleFilter("active"); setSearch(""); }}
             className="text-sm text-gray-500 hover:text-gray-700 px-2"
           >
             Clear filters
@@ -184,6 +211,7 @@ export default function HistoryPage() {
                 <th className="py-2 pr-4 font-medium">Period</th>
                 <th className="py-2 pr-4 font-medium">Filed As</th>
                 <th className="py-2 font-medium">Uploaded</th>
+                <th className="py-2 font-medium w-24"></th>
               </tr>
             </thead>
             <tbody>
@@ -239,11 +267,57 @@ export default function HistoryPage() {
                       minute: "2-digit",
                     })}
                   </td>
+                  <td className="py-2 text-right space-x-1">
+                    {(job.status === "error" || job.status === "duplicate") && (
+                      <button
+                        onClick={() => setRefileJob(job)}
+                        className="text-xs px-2 py-1 rounded text-white hover:opacity-90"
+                        style={{ backgroundColor: "var(--pss-navy)" }}
+                      >
+                        Refile
+                      </button>
+                    )}
+                    {job.status === "filed" && (
+                      <button
+                        onClick={() => setLifecycleJob(job)}
+                        className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100"
+                      >
+                        {(job.lifecycle_status ?? "active") === "active" ? "..." : job.lifecycle_status}
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      )}
+
+      {refileJob && (
+        <RefileDialog
+          jobId={refileJob.id}
+          initialTypeCode={refileJob.type_code}
+          initialAssetCode={refileJob.asset_code}
+          initialDocCode={refileJob.doc_code}
+          initialPeriod={refileJob.period}
+          onClose={() => setRefileJob(null)}
+          onRefiled={() => {
+            setRefileJob(null);
+            refetchJobs();
+          }}
+        />
+      )}
+
+      {lifecycleJob && (
+        <LifecycleDialog
+          jobId={lifecycleJob.id}
+          currentStatus={lifecycleJob.lifecycle_status ?? "active"}
+          onClose={() => setLifecycleJob(null)}
+          onUpdated={() => {
+            setLifecycleJob(null);
+            refetchJobs();
+          }}
+        />
       )}
     </div>
   );

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@platform/supabase/client";
 import { StatusBadge } from "./StatusBadge";
 import { RefileDialog } from "./RefileDialog";
+import { LifecycleDialog } from "./LifecycleDialog";
 
 const DOC_SERVICE_URL = process.env.NEXT_PUBLIC_DOC_SERVICE_URL ?? "";
 
@@ -19,6 +20,7 @@ type ScanJob = {
   filed_path: string | null;
   error_code: string | null;
   error_message: string | null;
+  lifecycle_status: string | null;
   created_at: string;
 };
 
@@ -26,11 +28,12 @@ export function RecentJobs() {
   const [jobs, setJobs] = useState<ScanJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [refileJob, setRefileJob] = useState<ScanJob | null>(null);
+  const [lifecycleJob, setLifecycleJob] = useState<ScanJob | null>(null);
 
   const fetchJobs = async () => {
     const { data } = await supabase
       .from("document_incoming_scan")
-      .select("id, file_name, status, type_code, asset_code, doc_code, period, document_type, filed_path, error_code, error_message, created_at")
+      .select("id, file_name, status, type_code, asset_code, doc_code, period, document_type, filed_path, error_code, error_message, lifecycle_status, created_at")
       .order("created_at", { ascending: false })
       .limit(10);
     setJobs(data ?? []);
@@ -117,7 +120,7 @@ export function RecentJobs() {
                     minute: "2-digit",
                   })}
                 </td>
-                <td className="py-2 text-right">
+                <td className="py-2 text-right space-x-1">
                   {(job.status === "error" || job.status === "duplicate") && (
                     <button
                       onClick={() => setRefileJob(job)}
@@ -125,6 +128,14 @@ export function RecentJobs() {
                       style={{ backgroundColor: "var(--pss-navy)" }}
                     >
                       Refile
+                    </button>
+                  )}
+                  {job.status === "filed" && (
+                    <button
+                      onClick={() => setLifecycleJob(job)}
+                      className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100"
+                    >
+                      {job.lifecycle_status === "active" || !job.lifecycle_status ? "..." : job.lifecycle_status}
                     </button>
                   )}
                 </td>
@@ -144,6 +155,18 @@ export function RecentJobs() {
           onClose={() => setRefileJob(null)}
           onRefiled={() => {
             setRefileJob(null);
+            fetchJobs();
+          }}
+        />
+      )}
+
+      {lifecycleJob && (
+        <LifecycleDialog
+          jobId={lifecycleJob.id}
+          currentStatus={lifecycleJob.lifecycle_status ?? "active"}
+          onClose={() => setLifecycleJob(null)}
+          onUpdated={() => {
+            setLifecycleJob(null);
             fetchJobs();
           }}
         />
