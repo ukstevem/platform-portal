@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@platform/supabase/client";
 import { StatusBadge } from "./StatusBadge";
+import { RefileDialog } from "./RefileDialog";
 
 const DOC_SERVICE_URL = process.env.NEXT_PUBLIC_DOC_SERVICE_URL ?? "";
 
@@ -24,6 +25,7 @@ type ScanJob = {
 export function RecentJobs() {
   const [jobs, setJobs] = useState<ScanJob[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refileJob, setRefileJob] = useState<ScanJob | null>(null);
 
   const fetchJobs = async () => {
     const { data } = await supabase
@@ -60,6 +62,7 @@ export function RecentJobs() {
               <th className="py-2 pr-4 font-medium">Period</th>
               <th className="py-2 pr-4 font-medium">Filed As</th>
               <th className="py-2 font-medium">Time</th>
+              <th className="py-2 font-medium w-16"></th>
             </tr>
           </thead>
           <tbody>
@@ -114,11 +117,37 @@ export function RecentJobs() {
                     minute: "2-digit",
                   })}
                 </td>
+                <td className="py-2 text-right">
+                  {(job.status === "error" || job.status === "duplicate") && (
+                    <button
+                      onClick={() => setRefileJob(job)}
+                      className="text-xs px-2 py-1 rounded text-white hover:opacity-90"
+                      style={{ backgroundColor: "var(--pss-navy)" }}
+                    >
+                      Refile
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {refileJob && (
+        <RefileDialog
+          jobId={refileJob.id}
+          initialTypeCode={refileJob.type_code}
+          initialAssetCode={refileJob.asset_code}
+          initialDocCode={refileJob.doc_code}
+          initialPeriod={refileJob.period}
+          onClose={() => setRefileJob(null)}
+          onRefiled={() => {
+            setRefileJob(null);
+            fetchJobs();
+          }}
+        />
+      )}
     </div>
   );
 }
