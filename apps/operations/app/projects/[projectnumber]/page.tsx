@@ -15,6 +15,7 @@ type ProjectItem = {
   est_labour: number;
   est_materials: number;
   completed: boolean;
+  created: string | null;
 };
 
 type Commercial = {
@@ -50,8 +51,9 @@ export default function ProjectDetailPage() {
   const [items, setItems] = useState<ProjectItem[]>([]);
   const [commercial, setCommercial] = useState<Map<string, Commercial>>(new Map());
   const [milestones, setMilestones] = useState<InvoiceMilestone[]>([]);
+  const [projectInfo, setProjectInfo] = useState<{ client_id: string | null; created: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"overview" | "schedule" | "invoicing">("overview");
+  const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set());
 
   // Load data
   useEffect(() => {
@@ -60,10 +62,19 @@ export default function ProjectDetailPage() {
     (async () => {
       setLoading(true);
 
+      // Project register info
+      const { data: regData } = await supabase
+        .from("project_register")
+        .select("client_id, created")
+        .eq("projectnumber", projectnumber)
+        .single();
+      if (cancelled) return;
+      setProjectInfo(regData ? { client_id: regData.client_id, created: regData.created } : null);
+
       // Project items
       const { data: itemData } = await supabase
         .from("project_register_items")
-        .select("id, projectnumber, item_seq, line_desc, value, est_labour, est_materials, completed")
+        .select("id, projectnumber, item_seq, line_desc, value, est_labour, est_materials, completed, created")
         .eq("projectnumber", projectnumber)
         .order("item_seq");
       if (cancelled) return;
@@ -77,6 +88,7 @@ export default function ProjectDetailPage() {
         est_labour: Number(r.est_labour) || 0,
         est_materials: Number(r.est_materials) || 0,
         completed: !!r.completed,
+        created: r.created ?? null,
       }));
       setItems(projectItems);
 
@@ -167,6 +179,14 @@ export default function ProjectDetailPage() {
     await supabase.from("project_invoice_schedule").delete().eq("id", id);
   }, []);
 
+  // Toggle item completed status
+  const toggleItemCompleted = useCallback(async (item: ProjectItem) => {
+    const newStatus = !item.completed;
+    const completedAt = newStatus ? new Date().toISOString() : null;
+    setItems((prev) => prev.map((i) => i.id === item.id ? { ...i, completed: newStatus } : i));
+    await supabase.from("project_register_items").update({ completed: newStatus, completed_at: completedAt }).eq("id", item.id);
+  }, []);
+
   const fmtC = (v: number) =>
     `£${v.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -240,11 +260,22 @@ export default function ProjectDetailPage() {
   return (
     <div className="min-h-screen p-6 max-w-6xl mx-auto">
       {/* Header */}
-      <div className="flex items-center gap-4 mb-6">
-        <a href="/operations/" className="text-gray-400 hover:text-gray-600 text-sm">&larr; Back</a>
-        <div>
-          <h1 className="text-xl font-semibold font-mono">{projectnumber}</h1>
-          <p className="text-sm text-gray-500">{items[0]?.line_desc ?? ""}</p>
+      <div className="mb-6">
+        <a href="/operations/" className="text-gray-400 hover:text-gray-600 text-xs">&larr; Back to Cost Overview</a>
+        <div className="flex items-start justify-between mt-2">
+          <div>
+            <h1 className="text-xl font-semibold">
+              <span className="font-mono">{projectnumber}</span>
+              {projectInfo?.client_id && <span className="text-gray-600"> — {projectInfo.client_id}</span>}
+            </h1>
+          </div>
+          <div className="text-right text-sm text-gray-500">
+            {(() => {
+              const receiptDate = projectInfo?.created ?? items[0]?.created;
+              return receiptDate ? <div>Received: <span className="text-gray-700 font-medium">{new Date(receiptDate).toLocaleDateString("en-GB")}</span></div> : null;
+            })()}
+            <div>Items: <span className="text-gray-700 font-medium">{items.length}</span></div>
+          </div>
         </div>
       </div>
 
@@ -276,322 +307,178 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="flex border-b mb-6">
-        {(["overview", "schedule", "invoicing"] as const).map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 text-sm font-medium cursor-pointer border-b-2 -mb-px ${activeTab === tab ? "border-[#061b37] text-[#061b37]" : "border-transparent text-gray-500 hover:text-gray-700"}`}
-          >
-            {tab === "overview" ? "Estimates & Progress" : tab === "schedule" ? "Schedule" : "Invoice Schedule"}
-          </button>
-        ))}
-      </div>
-
       {loading ? (
         <div className="text-sm text-gray-500 py-4">Loading project data...</div>
       ) : items.length === 0 ? (
         <div className="text-gray-500 py-8 text-center border rounded">No project items found</div>
       ) : (
         <>
-          {/* Tab: Estimates & Progress */}
-          {activeTab === "overview" && (
-            <div className="border rounded overflow-auto">
-              <table className="border-collapse text-sm w-full">
-                <thead>
-                  <tr className="bg-gray-50">
-                    <th className="border px-3 py-2 text-left min-w-28">Item</th>
-                    <th className="border px-3 py-2 text-left min-w-48">Description</th>
-                    <th className="border px-3 py-2 text-right min-w-28">Value</th>
-                    <th className="border px-3 py-2 text-right min-w-28 bg-blue-50">Est. Labour</th>
-                    <th className="border px-3 py-2 text-right min-w-28 bg-blue-50">Est. Materials</th>
-                    <th className="border px-3 py-2 text-right min-w-28">Est. Total</th>
-                    <th className="border px-3 py-2 text-right min-w-20">% Complete</th>
-                    <th className="border px-3 py-2 text-center min-w-20">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((item) => {
-                    const key = `${item.projectnumber}-${String(item.item_seq).padStart(2, "0")}`;
-                    const comm = commercial.get(key);
-                    const estTotal = item.est_labour + item.est_materials;
-                    return (
-                      <tr key={item.id} className="hover:bg-gray-50">
-                        <td className="border px-3 py-1.5 font-mono text-xs font-medium">
-                          {item.projectnumber}-{String(item.item_seq).padStart(2, "0")}
-                        </td>
-                        <td className="border px-3 py-1.5 text-xs text-gray-600">{item.line_desc}</td>
-                        <td className="border px-3 py-1.5 text-right">{fmtC(item.value)}</td>
-                        <td className="border px-3 py-1.5 bg-blue-50/30">
-                          <EditCell
-                            value={item.est_labour || ""}
-                            onSave={(v) => saveEstimate(item.id, "est_labour", parseFloat(v) || 0)}
-                            step="0.01"
-                            placeholder="set"
-                            className="text-right"
-                          />
-                        </td>
-                        <td className="border px-3 py-1.5 bg-blue-50/30">
-                          <EditCell
-                            value={item.est_materials || ""}
-                            onSave={(v) => saveEstimate(item.id, "est_materials", parseFloat(v) || 0)}
-                            step="0.01"
-                            placeholder="set"
-                            className="text-right"
-                          />
-                        </td>
-                        <td className="border px-3 py-1.5 text-right">{estTotal > 0 ? fmtC(estTotal) : "–"}</td>
-                        <td className="border px-3 py-1.5">
-                          <EditCell
-                            value={comm?.pct_complete || ""}
-                            onSave={(v) => saveCommercial(item, "pct_complete", Math.max(0, Math.min(100, Math.round(parseFloat(v) || 0))))}
-                            min="0"
-                            max="100"
-                            placeholder="set %"
-                            className="text-right"
-                          />
-                        </td>
-                        <td className="border px-3 py-1.5 text-center">
-                          <span className={`text-xs px-2 py-0.5 rounded ${item.completed ? "bg-gray-200 text-gray-600" : "bg-green-100 text-green-700"}`}>
-                            {item.completed ? "Completed" : "Live"}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {/* Totals */}
-                  <tr className="bg-gray-50 font-medium">
-                    <td className="border px-3 py-2" colSpan={2}>Totals</td>
-                    <td className="border px-3 py-2 text-right font-bold">{fmtC(totalContractValue)}</td>
-                    <td className="border px-3 py-2 text-right">{fmtC(totalEstLabour)}</td>
-                    <td className="border px-3 py-2 text-right">{fmtC(totalEstMaterials)}</td>
-                    <td className="border px-3 py-2 text-right font-bold">{fmtC(totalEstCost)}</td>
-                    <td className="border px-3 py-2" colSpan={2}></td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          )}
+          {/* Summary table */}
+          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-2">Project Items</h2>
+          {/* Item cards with expand/collapse */}
+          {items.map((item) => {
+            const key = `${item.projectnumber}-${String(item.item_seq).padStart(2, "0")}`;
+            const comm = commercial.get(key);
+            const estTotal = item.est_labour + item.est_materials;
+            const isExpanded = expandedItems.has(item.item_seq);
+            const itemMilestones = milestones.filter((m) => m.item_seq === item.item_seq);
+            const itemInvoiceTotal = itemMilestones.reduce((s, m) => s + m.planned_amount, 0);
 
-          {/* Tab: Schedule */}
-          {activeTab === "schedule" && (
-            <div className="border rounded overflow-auto">
-              <table className="border-collapse text-sm w-full">
-                <thead>
-                  <tr className="bg-gray-50">
-                    <th className="border px-3 py-2 text-left min-w-28">Item</th>
-                    <th className="border px-3 py-2 text-left min-w-48">Description</th>
-                    <th className="border px-3 py-2 text-center min-w-32">Planned Start</th>
-                    <th className="border px-3 py-2 text-center min-w-32">Planned Completion</th>
-                    <th className="border px-3 py-2 text-center min-w-32">Actual Start</th>
-                    <th className="border px-3 py-2 text-left min-w-48">Notes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((item) => {
-                    const key = `${item.projectnumber}-${String(item.item_seq).padStart(2, "0")}`;
-                    const comm = commercial.get(key);
-                    return (
-                      <tr key={item.id} className="hover:bg-gray-50">
-                        <td className="border px-3 py-1.5 font-mono text-xs font-medium">
-                          {item.projectnumber}-{String(item.item_seq).padStart(2, "0")}
-                        </td>
-                        <td className="border px-3 py-1.5 text-xs text-gray-600">{item.line_desc}</td>
-                        <td className="border px-3 py-1.5">
-                          <EditCell
-                            value={comm?.planned_start_date || ""}
-                            onSave={(v) => saveCommercial(item, "planned_start_date", v || null)}
-                            type="date"
-                            placeholder="set date"
-                            className="text-center"
-                          />
-                        </td>
-                        <td className="border px-3 py-1.5">
-                          <EditCell
-                            value={comm?.planned_completion_date || ""}
-                            onSave={(v) => saveCommercial(item, "planned_completion_date", v || null)}
-                            type="date"
-                            placeholder="set date"
-                            className="text-center"
-                          />
-                        </td>
-                        <td className="border px-3 py-1.5">
-                          <EditCell
-                            value={comm?.actual_start_date || ""}
-                            onSave={(v) => saveCommercial(item, "actual_start_date", v || null)}
-                            type="date"
-                            placeholder="set date"
-                            className="text-center"
-                          />
-                        </td>
-                        <td className="border px-3 py-1.5">
-                          <EditCell
-                            value={comm?.notes || ""}
-                            onSave={(v) => saveCommercial(item, "notes", v || null)}
-                            type="text"
-                            placeholder="add notes"
-                            className="text-left"
-                          />
-                        </td>
-                      </tr>
-                    );
+            return (
+              <div key={item.id} className="border rounded mb-3 bg-white">
+                {/* Item header — click to expand */}
+                <div
+                  className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-gray-50"
+                  onClick={() => setExpandedItems((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(item.item_seq)) next.delete(item.item_seq); else next.add(item.item_seq);
+                    return next;
                   })}
-                </tbody>
-              </table>
-            </div>
-          )}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="text-gray-400 w-4">{isExpanded ? "▼" : "▶"}</span>
+                    <span className="font-mono text-sm font-medium">{key}</span>
+                    <span className="text-sm text-gray-600">{item.line_desc}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded ${item.completed ? "bg-gray-200 text-gray-600" : "bg-green-100 text-green-700"}`}>
+                      {item.completed ? "Completed" : "Live"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-4 text-sm text-gray-500">
+                    <span>Value: <span className="font-medium text-gray-700">{fmtC(item.value)}</span></span>
+                    <span>Est: <span className="font-medium text-gray-700">{estTotal > 0 ? fmtC(estTotal) : "–"}</span></span>
+                    <span>Complete: <span className="font-medium text-gray-700">{comm?.pct_complete ?? 0}%</span></span>
+                    {item.created && <span className="text-xs text-gray-400">Added: {new Date(item.created).toLocaleDateString("en-GB")}</span>}
+                  </div>
+                </div>
 
-          {/* Tab: Invoice Schedule */}
-          {activeTab === "invoicing" && (
-            <div>
-              {/* Coverage bar */}
-              <div className="mb-4 border rounded p-3 bg-white">
-                <div className="flex items-center justify-between text-sm mb-2">
-                  <span>Invoice coverage: {fmtC(totalPlannedInvoice)} of {fmtC(totalContractValue)}</span>
-                  <span className={`font-medium ${invoiceCoverage >= 99 ? "text-green-700" : invoiceCoverage > 0 ? "text-amber-600" : "text-gray-400"}`}>
-                    {invoiceCoverage.toFixed(0)}%
-                  </span>
-                </div>
-                <div className="w-full bg-gray-200 rounded h-2">
-                  <div
-                    className={`h-2 rounded ${invoiceCoverage >= 99 ? "bg-green-500" : "bg-amber-500"}`}
-                    style={{ width: `${Math.min(invoiceCoverage, 100)}%` }}
-                  />
-                </div>
-                {Math.abs(totalPlannedInvoice - totalContractValue) > 0.01 && totalPlannedInvoice > 0 && (
-                  <div className="text-xs text-amber-600 mt-1">
-                    Difference: {fmtC(totalContractValue - totalPlannedInvoice)}
+                {/* Expanded content */}
+                {isExpanded && (
+                  <div className="border-t px-4 py-4 space-y-6">
+                    {/* Status toggle */}
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => toggleItemCompleted(item)}
+                        className={`text-xs px-3 py-1.5 rounded border cursor-pointer ${item.completed ? "bg-green-50 text-green-700 border-green-300 hover:bg-green-100" : "bg-gray-50 text-gray-600 border-gray-300 hover:bg-gray-100"}`}
+                      >
+                        {item.completed ? "Reopen item" : "Mark as completed"}
+                      </button>
+                    </div>
+                    {/* Estimates */}
+                    <div>
+                      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Estimates & Progress</h3>
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                        <div>
+                          <div className="text-xs text-gray-400 mb-1">Est. Labour</div>
+                          <EditCell value={item.est_labour || ""} onSave={(v) => saveEstimate(item.id, "est_labour", parseFloat(v) || 0)} step="0.01" placeholder="set" className="text-right border rounded px-2 py-1 bg-blue-50/30" />
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-400 mb-1">Est. Materials</div>
+                          <EditCell value={item.est_materials || ""} onSave={(v) => saveEstimate(item.id, "est_materials", parseFloat(v) || 0)} step="0.01" placeholder="set" className="text-right border rounded px-2 py-1 bg-blue-50/30" />
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-400 mb-1">Est. Total</div>
+                          <div className="text-sm font-medium px-2 py-1">{estTotal > 0 ? fmtC(estTotal) : "–"}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-400 mb-1">% Complete</div>
+                          <EditCell value={comm?.pct_complete || ""} onSave={(v) => saveCommercial(item, "pct_complete", Math.max(0, Math.min(100, Math.round(parseFloat(v) || 0))))} min="0" max="100" placeholder="set %" className="text-right border rounded px-2 py-1" />
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-400 mb-1">Margin</div>
+                          <div className={`text-sm font-medium px-2 py-1 ${estTotal > 0 ? (item.value - estTotal >= 0 ? "text-green-700" : "text-red-600") : ""}`}>
+                            {estTotal > 0 ? fmtC(item.value - estTotal) : "–"}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Schedule */}
+                    <div>
+                      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Schedule</h3>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div>
+                          <div className="text-xs text-gray-400 mb-1">Planned Start</div>
+                          <EditCell value={comm?.planned_start_date || ""} onSave={(v) => saveCommercial(item, "planned_start_date", v || null)} type="date" placeholder="set date" className="text-center border rounded px-2 py-1" />
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-400 mb-1">Planned Completion</div>
+                          <EditCell value={comm?.planned_completion_date || ""} onSave={(v) => saveCommercial(item, "planned_completion_date", v || null)} type="date" placeholder="set date" className="text-center border rounded px-2 py-1" />
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-400 mb-1">Actual Start</div>
+                          <EditCell value={comm?.actual_start_date || ""} onSave={(v) => saveCommercial(item, "actual_start_date", v || null)} type="date" placeholder="set date" className="text-center border rounded px-2 py-1" />
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-400 mb-1">Notes</div>
+                          <EditCell value={comm?.notes || ""} onSave={(v) => saveCommercial(item, "notes", v || null)} type="text" placeholder="add notes" className="text-left border rounded px-2 py-1" />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Invoice milestones */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                          Invoice Schedule
+                          <span className="text-gray-400 font-normal ml-2">({fmtC(itemInvoiceTotal)} of {fmtC(item.value)})</span>
+                        </h3>
+                        <button type="button" onClick={() => addMilestone(item)} className="text-xs rounded border px-2 py-1 hover:bg-gray-100 cursor-pointer">+ Add milestone</button>
+                      </div>
+                      {itemMilestones.length > 0 ? (
+                        <table className="border-collapse text-sm w-full">
+                          <thead>
+                            <tr className="bg-gray-50">
+                              <th className="border px-3 py-1.5 text-left min-w-48">Milestone</th>
+                              <th className="border px-3 py-1.5 text-center min-w-28">Planned Date</th>
+                              <th className="border px-3 py-1.5 text-right min-w-28">Amount</th>
+                              <th className="border px-3 py-1.5 text-center min-w-16">Invoiced</th>
+                              <th className="border px-3 py-1.5 text-left min-w-28">Invoice Ref</th>
+                              <th className="border px-3 py-1.5 text-center min-w-28">Actual Date</th>
+                              <th className="border px-3 py-1.5 text-right min-w-28">Actual Amount</th>
+                              <th className="border px-3 py-1.5 text-center min-w-12"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {itemMilestones.map((ms) => (
+                              <tr key={ms.id} className="hover:bg-gray-50">
+                                <td className="border px-3 py-1">
+                                  <EditCell value={ms.milestone} onSave={(v) => updateMilestone(ms.id, "milestone", v)} type="text" placeholder="Milestone description" className="text-left" />
+                                </td>
+                                <td className="border px-3 py-1">
+                                  <EditCell value={ms.planned_date || ""} onSave={(v) => updateMilestone(ms.id, "planned_date", v || null)} type="date" className="text-center" />
+                                </td>
+                                <td className="border px-3 py-1">
+                                  <EditCell value={ms.planned_amount || ""} onSave={(v) => updateMilestone(ms.id, "planned_amount", parseFloat(v) || 0)} step="0.01" placeholder="0.00" className="text-right" />
+                                </td>
+                                <td className="border px-3 py-1 text-center">
+                                  <input type="checkbox" checked={ms.invoiced} onChange={(e) => updateMilestone(ms.id, "invoiced", e.target.checked)} className="cursor-pointer" />
+                                </td>
+                                <td className="border px-3 py-1">
+                                  <EditCell value={ms.invoice_reference || ""} onSave={(v) => updateMilestone(ms.id, "invoice_reference", v || null)} type="text" placeholder="ref" className="text-left" />
+                                </td>
+                                <td className="border px-3 py-1">
+                                  <EditCell value={ms.actual_date || ""} onSave={(v) => updateMilestone(ms.id, "actual_date", v || null)} type="date" className="text-center" />
+                                </td>
+                                <td className="border px-3 py-1">
+                                  <EditCell value={ms.actual_amount ?? ""} onSave={(v) => updateMilestone(ms.id, "actual_amount", parseFloat(v) || null)} step="0.01" placeholder="—" className="text-right" />
+                                </td>
+                                <td className="border px-3 py-1 text-center">
+                                  <button type="button" onClick={() => deleteMilestone(ms.id)} className="text-red-400 hover:text-red-600 cursor-pointer text-xs" title="Delete milestone">✕</button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : (
+                        <div className="text-xs text-gray-400 border rounded px-3 py-2">No milestones — click "+ Add milestone" to create one</div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
-
-              {items.map((item) => {
-                const itemKey = `${item.projectnumber}-${String(item.item_seq).padStart(2, "0")}`;
-                const itemMilestones = milestones.filter((m) => m.item_seq === item.item_seq);
-                const itemInvoiceTotal = itemMilestones.reduce((s, m) => s + m.planned_amount, 0);
-
-                return (
-                  <div key={item.id} className="mb-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <div>
-                        <span className="font-mono text-sm font-medium">{itemKey}</span>
-                        <span className="text-xs text-gray-500 ml-2">{item.line_desc}</span>
-                        <span className="text-xs text-gray-400 ml-2">
-                          (Value: {fmtC(item.value)} | Scheduled: {fmtC(itemInvoiceTotal)})
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => addMilestone(item)}
-                        className="text-xs rounded border px-2 py-1 hover:bg-gray-100 cursor-pointer"
-                      >
-                        + Add milestone
-                      </button>
-                    </div>
-
-                    {itemMilestones.length > 0 ? (
-                      <table className="border-collapse text-sm w-full mb-2">
-                        <thead>
-                          <tr className="bg-gray-50">
-                            <th className="border px-3 py-1.5 text-left min-w-48">Milestone</th>
-                            <th className="border px-3 py-1.5 text-center min-w-28">Planned Date</th>
-                            <th className="border px-3 py-1.5 text-right min-w-28">Planned Amount</th>
-                            <th className="border px-3 py-1.5 text-center min-w-20">Invoiced</th>
-                            <th className="border px-3 py-1.5 text-left min-w-28">Invoice Ref</th>
-                            <th className="border px-3 py-1.5 text-center min-w-28">Actual Date</th>
-                            <th className="border px-3 py-1.5 text-right min-w-28">Actual Amount</th>
-                            <th className="border px-3 py-1.5 text-center min-w-12"></th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {itemMilestones.map((ms) => (
-                            <tr key={ms.id} className="hover:bg-gray-50">
-                              <td className="border px-3 py-1">
-                                <EditCell
-                                  value={ms.milestone}
-                                  onSave={(v) => updateMilestone(ms.id, "milestone", v)}
-                                  type="text"
-                                  placeholder="Milestone description"
-                                  className="text-left"
-                                />
-                              </td>
-                              <td className="border px-3 py-1">
-                                <EditCell
-                                  value={ms.planned_date || ""}
-                                  onSave={(v) => updateMilestone(ms.id, "planned_date", v || null)}
-                                  type="date"
-                                  className="text-center"
-                                />
-                              </td>
-                              <td className="border px-3 py-1">
-                                <EditCell
-                                  value={ms.planned_amount || ""}
-                                  onSave={(v) => updateMilestone(ms.id, "planned_amount", parseFloat(v) || 0)}
-                                  step="0.01"
-                                  placeholder="0.00"
-                                  className="text-right"
-                                />
-                              </td>
-                              <td className="border px-3 py-1 text-center">
-                                <input
-                                  type="checkbox"
-                                  checked={ms.invoiced}
-                                  onChange={(e) => updateMilestone(ms.id, "invoiced", e.target.checked)}
-                                  className="cursor-pointer"
-                                />
-                              </td>
-                              <td className="border px-3 py-1">
-                                <EditCell
-                                  value={ms.invoice_reference || ""}
-                                  onSave={(v) => updateMilestone(ms.id, "invoice_reference", v || null)}
-                                  type="text"
-                                  placeholder="ref"
-                                  className="text-left"
-                                />
-                              </td>
-                              <td className="border px-3 py-1">
-                                <EditCell
-                                  value={ms.actual_date || ""}
-                                  onSave={(v) => updateMilestone(ms.id, "actual_date", v || null)}
-                                  type="date"
-                                  className="text-center"
-                                />
-                              </td>
-                              <td className="border px-3 py-1">
-                                <EditCell
-                                  value={ms.actual_amount ?? ""}
-                                  onSave={(v) => updateMilestone(ms.id, "actual_amount", parseFloat(v) || null)}
-                                  step="0.01"
-                                  placeholder="—"
-                                  className="text-right"
-                                />
-                              </td>
-                              <td className="border px-3 py-1 text-center">
-                                <button
-                                  type="button"
-                                  onClick={() => deleteMilestone(ms.id)}
-                                  className="text-red-400 hover:text-red-600 cursor-pointer text-xs"
-                                  title="Delete milestone"
-                                >
-                                  ✕
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    ) : (
-                      <div className="text-xs text-gray-400 border rounded px-3 py-2 mb-2">
-                        No milestones — click "+ Add milestone" to create one
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
+            );
+          })}
         </>
       )}
     </div>
