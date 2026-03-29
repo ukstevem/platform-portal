@@ -13,6 +13,7 @@ export function AppSidebar() {
           heading: "Operations",
           items: [
             { label: "Project Cost Overview", href: "/operations/" },
+            { label: "Earned Value Analysis", href: "/operations/earned-value" },
           ],
         },
       ]}

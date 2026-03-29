@@ -36,13 +36,13 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
   // Load project items for the add-project picker
   useEffect(() => {
     (async () => {
-      let all: { projectnumber: string; item_seq: number; line_desc: string }[] = [];
+      let all: { projectnumber: string; item_seq: number; line_desc: string; completed: boolean }[] = [];
       let from = 0;
       const pageSize = 1000;
       while (true) {
         const { data } = await supabase
           .from("project_register_items")
-          .select("projectnumber, item_seq, line_desc")
+          .select("projectnumber, item_seq, line_desc, completed")
           .order("projectnumber")
           .order("item_seq")
           .range(from, from + pageSize - 1);
@@ -55,6 +55,7 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
         all.map((r) => ({
           project_item: `${r.projectnumber}-${String(r.item_seq).padStart(2, "0")}`,
           line_desc: r.line_desc,
+          completed: !!r.completed,
         }))
       );
     })();
@@ -474,11 +475,13 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
                     <button
                       key={p.project_item}
                       type="button"
-                      onClick={() => addProject(p.project_item)}
-                      className="w-full text-left px-3 py-1.5 text-sm hover:bg-blue-50 cursor-pointer"
+                      onClick={() => !p.completed && addProject(p.project_item)}
+                      disabled={p.completed}
+                      className={`w-full text-left px-3 py-1.5 text-sm ${p.completed ? "opacity-40 cursor-not-allowed" : "hover:bg-blue-50 cursor-pointer"}`}
                     >
                       <span className="font-mono font-medium">{p.project_item}</span>
                       <span className="text-gray-500 ml-2 text-xs">{p.line_desc}</span>
+                      {p.completed && <span className="text-xs text-red-400 ml-2">(completed)</span>}
                     </button>
                   ))}
                 </div>

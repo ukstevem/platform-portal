@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState, useCallback } from "react";
 import { supabase } from "@platform/supabase";
 import { useAuth } from "@platform/auth/AuthProvider";
 import { AuthButton } from "@platform/auth/AuthButton";
@@ -29,6 +29,9 @@ type ItemRow = {
   project_item: string;
   description: string;
   projectValue: number;
+  estLabour: number;
+  estMaterials: number;
+  pctComplete: number;
   basicHours: number;
   otHours: number;
   labourCost: number;
@@ -41,12 +44,21 @@ type ProjectRow = {
   projectnumber: string;
   description: string;
   projectValue: number;
+  estLabour: number;
+  estMaterials: number;
   basicHours: number;
   otHours: number;
   labourCost: number;
   committed: number;
   invoiced: number;
   totalCost: number;
+  estTotalCost: number;
+  pctComplete: number;
+  labourVariance: number;
+  materialsVariance: number;
+  plannedMargin: number;
+  currentMargin: number;
+  marginPosition: number; // percentage
   items: ItemRow[];
   hasMultipleItems: boolean;
 };
@@ -59,6 +71,9 @@ export default function ProjectCostOverview() {
   const [itemDescMap, setItemDescMap] = useState<Map<string, string>>(new Map());
   const [itemValueMap, setItemValueMap] = useState<Map<string, number>>(new Map());
   const [projectValueMap, setProjectValueMap] = useState<Map<string, number>>(new Map());
+  const [estLabourMap, setEstLabourMap] = useState<Map<string, number>>(new Map());
+  const [estMaterialsMap, setEstMaterialsMap] = useState<Map<string, number>>(new Map());
+  const [itemIdMap, setItemIdMap] = useState<Map<string, string>>(new Map()); // "10312-01" → uuid
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [hiddenSeries, setHiddenSeries] = useState<Set<string>>(new Set());
@@ -67,19 +82,21 @@ export default function ProjectCostOverview() {
   // Configurable rates
   const [basicRate, setBasicRate] = useState(49);
   const [otMultiplier, setOtMultiplier] = useState(1.5);
-  const [targetMargin, setTargetMargin] = useState(30);
   const [showSettings, setShowSettings] = useState(false);
+  const [projectFilter, setProjectFilter] = useState<"live" | "completed" | "all">("live");
+  const [completedMap, setCompletedMap] = useState<Map<string, boolean>>(new Map());
+  const [pctCompleteMap, setPctCompleteMap] = useState<Map<string, number>>(new Map());
 
   // Load all data
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
+      const pageSize = 1000;
 
       // Timesheet entries — paginated
       let allTs: TimesheetEntry[] = [];
       let from = 0;
-      const pageSize = 1000;
       while (true) {
         const { data } = await supabase
           .from("timesheet_entries")
@@ -92,12 +109,9 @@ export default function ProjectCostOverview() {
         from += pageSize;
       }
 
-      // Purchase orders — paginated (from accounts_overview for values, purchase_orders for dates)
+      // Purchase orders — paginated
       let allPo: PurchaseOrder[] = [];
-      from = 0;
-      // Use accounts_overview for value + invoice info
       const poDateMap = new Map<number, string>();
-      // Fetch dates from purchase_orders table
       let dateFrom = 0;
       while (true) {
         const { data } = await supabase
@@ -109,7 +123,6 @@ export default function ProjectCostOverview() {
         if (data.length < pageSize) break;
         dateFrom += pageSize;
       }
-      // Fetch PO values from accounts_overview
       from = 0;
       while (true) {
         const { data } = await supabase
@@ -131,16 +144,20 @@ export default function ProjectCostOverview() {
         from += pageSize;
       }
 
-      // Project descriptions and values (per item and rolled up per project)
+      // Project descriptions, values, estimates, and IDs
       const m = new Map<string, string>();
       const iDescMap = new Map<string, string>();
       const iValMap = new Map<string, number>();
       const valMap = new Map<string, number>();
+      const idMap = new Map<string, string>();
+      const eLab = new Map<string, number>();
+      const eMat = new Map<string, number>();
+      const compMap = new Map<string, boolean>(); // projectnumber → completed (true if ALL items completed)
       from = 0;
       while (true) {
         const { data } = await supabase
           .from("project_register_items")
-          .select("projectnumber, item_seq, line_desc, value")
+          .select("id, projectnumber, item_seq, line_desc, value, est_labour, est_materials, completed")
           .range(from, from + pageSize - 1);
         if (!data || data.length === 0) break;
         for (const r of data) {
@@ -150,6 +167,16 @@ export default function ProjectCostOverview() {
           iDescMap.set(itemKey, r.line_desc);
           iValMap.set(itemKey, Number(r.value) || 0);
           valMap.set(r.projectnumber, (valMap.get(r.projectnumber) ?? 0) + (Number(r.value) || 0));
+          idMap.set(itemKey, r.id);
+          eLab.set(itemKey, Number(r.est_labour) || 0);
+          eMat.set(itemKey, Number(r.est_materials) || 0);
+          // A project is completed only if ALL its items are completed
+          const wasCompleted = compMap.get(r.projectnumber);
+          if (wasCompleted === undefined) {
+            compMap.set(r.projectnumber, !!r.completed);
+          } else if (!r.completed) {
+            compMap.set(r.projectnumber, false);
+          }
         }
         if (data.length < pageSize) break;
         from += pageSize;
@@ -162,14 +189,97 @@ export default function ProjectCostOverview() {
       setItemDescMap(iDescMap);
       setItemValueMap(iValMap);
       setProjectValueMap(valMap);
+      setEstLabourMap(eLab);
+      setEstMaterialsMap(eMat);
+      setItemIdMap(idMap);
+      setCompletedMap(compMap);
+
+      // Fetch commercial data (% complete per item, keyed by "10300-01")
+      const pctMap = new Map<string, number>();
+      from = 0;
+      while (true) {
+        const { data } = await supabase
+          .from("project_items_commercial")
+          .select("projectnumber, item_seq, pct_complete")
+          .range(from, from + pageSize - 1);
+        if (!data || data.length === 0) break;
+        for (const r of data) {
+          const key = `${r.projectnumber}-${String(r.item_seq).padStart(2, "0")}`;
+          pctMap.set(key, r.pct_complete ?? 0);
+        }
+        if (data.length < pageSize) break;
+        from += pageSize;
+      }
+      if (cancelled) return;
+      setPctCompleteMap(pctMap);
+
       setLoading(false);
     })();
     return () => { cancelled = true; };
   }, []);
 
+  // Save estimate to DB (updates project_register_items directly)
+  const saveEstimate = useCallback(async (projectnumber: string, item_seq: number, field: "est_labour" | "est_materials", value: number) => {
+    const key = `${projectnumber}-${String(item_seq).padStart(2, "0")}`;
+    const id = itemIdMap.get(key);
+    if (!id) return;
+
+    if (field === "est_labour") {
+      setEstLabourMap((prev) => { const next = new Map(prev); next.set(key, value); return next; });
+    } else {
+      setEstMaterialsMap((prev) => { const next = new Map(prev); next.set(key, value); return next; });
+    }
+
+    await supabase.from("project_register_items").update({ [field]: value }).eq("id", id);
+  }, [itemIdMap]);
+
+  // Save % complete to project_items_commercial (upsert per item)
+  const savePctComplete = useCallback(async (projectnumber: string, item_seq: number, value: number) => {
+    const key = `${projectnumber}-${String(item_seq).padStart(2, "0")}`;
+    const project_item_id = itemIdMap.get(key);
+    if (!project_item_id) {
+      console.warn("No project_item_id found for", key);
+      return;
+    }
+    const clamped = Math.max(0, Math.min(100, Math.round(value)));
+    setPctCompleteMap((prev) => { const next = new Map(prev); next.set(key, clamped); return next; });
+    const { error } = await supabase.from("project_items_commercial").upsert(
+      { project_item_id, projectnumber, item_seq, pct_complete: clamped },
+      { onConflict: "projectnumber,item_seq" }
+    );
+    if (error) console.error("Failed to save % complete:", error);
+  }, [itemIdMap]);
+
+  // Toggle project completed status
+  const toggleCompleted = useCallback(async (projectnumber: string) => {
+    const isCompleted = completedMap.get(projectnumber) ?? false;
+    const newStatus = !isCompleted;
+    const completedAt = newStatus ? new Date().toISOString() : null;
+
+    // Update all items for this project
+    await supabase
+      .from("project_register_items")
+      .update({ completed: newStatus, completed_at: completedAt })
+      .eq("projectnumber", projectnumber);
+
+    setCompletedMap((prev) => {
+      const next = new Map(prev);
+      next.set(projectnumber, newStatus);
+      return next;
+    });
+  }, [completedMap]);
+
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; projectnumber: string } | null>(null);
+
+  useEffect(() => {
+    const close = () => setContextMenu(null);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, []);
+
   // Build project rows with sub-items
   const projectRows = useMemo<ProjectRow[]>(() => {
-    // Aggregate hours by project_item (e.g. "10312-01")
     const itemHoursMap = new Map<string, { basic: number; ot: number }>();
     for (const e of tsEntries) {
       if (["SHOPWORK-01", "HOLIDAY-01", "TRAINING-01", "SICK-01"].includes(e.project_item)) continue;
@@ -179,7 +289,6 @@ export default function ProjectCostOverview() {
       if (e.is_overtime) { entry.ot += hrs; } else { entry.basic += hrs; }
     }
 
-    // Aggregate PO values by project
     const committedMap = new Map<string, number>();
     const invoicedMap = new Map<string, number>();
     for (const po of poData) {
@@ -191,7 +300,6 @@ export default function ProjectCostOverview() {
       }
     }
 
-    // Collect all project-item keys and group by project number
     const allItemKeys = new Set([...itemHoursMap.keys(), ...itemValueMap.keys()]);
     const projItemsMap = new Map<string, Set<string>>();
     for (const itemKey of allItemKeys) {
@@ -201,7 +309,6 @@ export default function ProjectCostOverview() {
       projItemsMap.get(proj)!.add(itemKey);
     }
 
-    // Also ensure projects from POs and projectValueMap are included
     const allProjects = new Set([
       ...projItemsMap.keys(),
       ...committedMap.keys(),
@@ -215,7 +322,6 @@ export default function ProjectCostOverview() {
         const invoiced = invoicedMap.get(proj) ?? 0;
         const projectValue = projectValueMap.get(proj) ?? 0;
 
-        // Build sub-items
         const itemKeys = Array.from(projItemsMap.get(proj) ?? []).sort();
         const items: ItemRow[] = itemKeys.map((itemKey) => {
           const hrs = itemHoursMap.get(itemKey) ?? { basic: 0, ot: 0 };
@@ -225,6 +331,9 @@ export default function ProjectCostOverview() {
             project_item: itemKey,
             description: itemDescMap.get(itemKey) ?? "",
             projectValue: val,
+            estLabour: estLabourMap.get(itemKey) ?? 0,
+            estMaterials: estMaterialsMap.get(itemKey) ?? 0,
+            pctComplete: pctCompleteMap.get(itemKey) ?? 0,
             basicHours: hrs.basic,
             otHours: hrs.ot,
             labourCost: lc,
@@ -234,30 +343,57 @@ export default function ProjectCostOverview() {
           };
         });
 
-        // Aggregate hours from items
         const totalBasic = items.reduce((s, i) => s + i.basicHours, 0);
         const totalOT = items.reduce((s, i) => s + i.otHours, 0);
         const labourCost = totalBasic * basicRate + totalOT * basicRate * otMultiplier;
+        const estLabour = items.reduce((s, i) => s + i.estLabour, 0);
+        const estMaterials = items.reduce((s, i) => s + i.estMaterials, 0);
+        const actualMaterials = committed + invoiced;
+        const totalCost = labourCost + actualMaterials;
 
         return {
           projectnumber: proj,
           description: descMap.get(proj) ?? "",
           projectValue,
+          estLabour,
+          estMaterials,
           basicHours: totalBasic,
           otHours: totalOT,
           labourCost,
           committed,
           invoiced,
-          totalCost: labourCost + committed + invoiced,
+          totalCost,
+          estTotalCost: estLabour + estMaterials,
+          pctComplete: (() => {
+            // Weighted average of item % complete, weighted by est cost per item
+            const totalEstCost = items.reduce((s, i) => s + i.estLabour + i.estMaterials, 0);
+            if (totalEstCost === 0) return items.length > 0 ? Math.round(items.reduce((s, i) => s + i.pctComplete, 0) / items.length) : 0;
+            return Math.round(items.reduce((s, i) => s + i.pctComplete * (i.estLabour + i.estMaterials), 0) / totalEstCost);
+          })(),
+          labourVariance: estLabour - labourCost,
+          materialsVariance: estMaterials - actualMaterials,
+          plannedMargin: projectValue - (estLabour + estMaterials),
+          currentMargin: (projectValue - (estLabour + estMaterials)) + (estLabour - labourCost) + (estMaterials - actualMaterials),
+          marginPosition: (() => {
+            const pm = projectValue - (estLabour + estMaterials);
+            if ((estLabour + estMaterials) === 0 || pm === 0) return 0;
+            return (((estLabour - labourCost) + (estMaterials - actualMaterials)) / pm) * 100;
+          })(),
           items,
           hasMultipleItems: items.length > 1,
         };
       })
       .filter((r) => r.basicHours > 0 || r.otHours > 0 || r.committed > 0 || r.invoiced > 0 || r.projectValue > 0)
+      .filter((r) => {
+        const isCompleted = completedMap.get(r.projectnumber) ?? false;
+        if (projectFilter === "live") return !isCompleted;
+        if (projectFilter === "completed") return isCompleted;
+        return true;
+      })
       .sort((a, b) => (parseInt(b.projectnumber) || 0) - (parseInt(a.projectnumber) || 0));
 
     return rows;
-  }, [tsEntries, poData, descMap, itemDescMap, itemValueMap, projectValueMap, basicRate, otMultiplier]);
+  }, [tsEntries, poData, descMap, itemDescMap, itemValueMap, projectValueMap, estLabourMap, estMaterialsMap, pctCompleteMap, completedMap, projectFilter, basicRate, otMultiplier]);
 
   const toggleExpand = (proj: string) => {
     setExpanded((prev) => {
@@ -272,14 +408,21 @@ export default function ProjectCostOverview() {
     return projectRows.reduce(
       (acc, r) => ({
         projectValue: acc.projectValue + r.projectValue,
+        estLabour: acc.estLabour + r.estLabour,
+        estMaterials: acc.estMaterials + r.estMaterials,
         basicHours: acc.basicHours + r.basicHours,
         otHours: acc.otHours + r.otHours,
         labourCost: acc.labourCost + r.labourCost,
         committed: acc.committed + r.committed,
         invoiced: acc.invoiced + r.invoiced,
         totalCost: acc.totalCost + r.totalCost,
+        estTotalCost: acc.estTotalCost + r.estTotalCost,
+        labourVariance: acc.labourVariance + r.labourVariance,
+        materialsVariance: acc.materialsVariance + r.materialsVariance,
+        plannedMargin: acc.plannedMargin + r.plannedMargin,
+        currentMargin: acc.currentMargin + r.currentMargin,
       }),
-      { projectValue: 0, basicHours: 0, otHours: 0, labourCost: 0, committed: 0, invoiced: 0, totalCost: 0 }
+      { projectValue: 0, estLabour: 0, estMaterials: 0, basicHours: 0, otHours: 0, labourCost: 0, committed: 0, invoiced: 0, totalCost: 0, estTotalCost: 0, labourVariance: 0, materialsVariance: 0, plannedMargin: 0, currentMargin: 0 }
     );
   }, [projectRows]);
 
@@ -291,26 +434,92 @@ export default function ProjectCostOverview() {
     const str = `£${abs.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     return v < 0 ? `-${str}` : str;
   };
-  // Margin calculations per row
-  const marginCalc = (row: { projectValue: number; totalCost: number }) => {
-    const targetMarginValue = row.projectValue * (targetMargin / 100);
-    const actualMargin = row.projectValue - row.totalCost;
-    const variance = actualMargin - targetMarginValue;
-    return { targetMarginValue, actualMargin, variance };
+
+  // Editable % complete cell component
+  const PctCell = ({ projectnumber, itemSeq, value }: { projectnumber: string; itemSeq: number; value: number }) => {
+    const [editing, setEditing] = useState(false);
+    const [inputVal, setInputVal] = useState(String(value || ""));
+
+    if (editing) {
+      return (
+        <input
+          type="number"
+          min="0"
+          max="100"
+          autoFocus
+          value={inputVal}
+          onChange={(e) => setInputVal(e.target.value)}
+          onBlur={() => {
+            setEditing(false);
+            savePctComplete(projectnumber, itemSeq, parseFloat(inputVal) || 0);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            if (e.key === "Escape") setEditing(false);
+          }}
+          className="w-full text-right text-sm border rounded px-1 py-0.5"
+        />
+      );
+    }
+    return (
+      <span
+        onClick={(e) => { e.stopPropagation(); setEditing(true); setInputVal(String(value || "")); }}
+        className="cursor-pointer hover:bg-blue-50 px-1 py-0.5 rounded block text-right"
+        title="Click to edit"
+      >
+        {value > 0 ? `${value}%` : <span className="text-gray-300">set %</span>}
+      </span>
+    );
   };
 
-  // Spend profile chart data for selected project
+  // Editable estimate cell component
+  const EstCell = ({ projectnumber, itemSeq, field, value }: { projectnumber: string; itemSeq: number; field: "est_labour" | "est_materials"; value: number }) => {
+    const [editing, setEditing] = useState(false);
+    const [inputVal, setInputVal] = useState(String(value || ""));
+
+    if (editing) {
+      return (
+        <input
+          type="number"
+          step="0.01"
+          autoFocus
+          value={inputVal}
+          onChange={(e) => setInputVal(e.target.value)}
+          onBlur={() => {
+            setEditing(false);
+            const num = parseFloat(inputVal) || 0;
+            saveEstimate(projectnumber, itemSeq, field, num);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            if (e.key === "Escape") setEditing(false);
+          }}
+          className="w-full text-right text-sm border rounded px-1 py-0.5"
+        />
+      );
+    }
+    return (
+      <span
+        onClick={(e) => { e.stopPropagation(); setEditing(true); setInputVal(String(value || "")); }}
+        className="cursor-pointer hover:bg-blue-50 px-1 py-0.5 rounded block text-right"
+        title="Click to edit"
+      >
+        {value > 0 ? fmtCurrency(value) : <span className="text-gray-300">click to set</span>}
+      </span>
+    );
+  };
+
+  // Spend profile chart data
   const chartData = useMemo(() => {
     if (!selectedProject) return [];
 
-    // Bucket timesheet hours by month for this project
     const monthMap = new Map<string, { labourCost: number; poSpend: number }>();
 
     for (const e of tsEntries) {
       const proj = e.project_item.replace(/-\d+$/, "");
       if (proj !== selectedProject) continue;
       if (["SHOPWORK-01", "HOLIDAY-01", "TRAINING-01", "SICK-01"].includes(e.project_item)) continue;
-      const month = e.work_date?.slice(0, 7); // YYYY-MM
+      const month = e.work_date?.slice(0, 7);
       if (!month) continue;
       if (!monthMap.has(month)) monthMap.set(month, { labourCost: 0, poSpend: 0 });
       const entry = monthMap.get(month)!;
@@ -318,7 +527,6 @@ export default function ProjectCostOverview() {
       entry.labourCost += e.is_overtime ? hrs * basicRate * otMultiplier : hrs * basicRate;
     }
 
-    // Bucket PO spend by month for this project
     for (const po of poData) {
       if (po.project_id !== selectedProject) continue;
       const month = po.created_at?.slice(0, 7);
@@ -327,7 +535,6 @@ export default function ProjectCostOverview() {
       monthMap.get(month)!.poSpend += po.total_value;
     }
 
-    // Sort by month and calculate cumulatives
     const sorted = Array.from(monthMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
     let cumTotal = 0;
     let cumLabour = 0;
@@ -369,64 +576,89 @@ export default function ProjectCostOverview() {
     const cellN = { ...cellT, alignment: { horizontal: "right" as const, vertical: "center" as const }, numFmt: "0.00" };
     const cellC = { ...cellT, alignment: { horizontal: "right" as const, vertical: "center" as const }, numFmt: "£#,##0.00" };
     const cellOT = { ...cellN, font: { sz: 10, color: { rgb: "D97706" } } };
+    const cellGreen = { ...cellC, font: { sz: 10, color: { rgb: "15803D" } } };
+    const cellRed = { ...cellC, font: { sz: 10, color: { rgb: "DC2626" } } };
     const totS = { ...cellN, font: { sz: 10, bold: true }, fill: { fgColor: { rgb: "F3F4F6" } } };
     const totC = { ...cellC, font: { sz: 10, bold: true }, fill: { fgColor: { rgb: "F3F4F6" } } };
     const totL = { ...cellT, font: { sz: 10, bold: true }, fill: { fgColor: { rgb: "F3F4F6" } }, alignment: { horizontal: "right" as const, vertical: "center" as const } };
 
     const nc = (v: number, s: object) => v > 0 ? { v, t: "n", s } : { v: "", t: "s", s: cellT };
     const tc = (v: string, s?: object) => ({ v, t: "s", s: s ?? cellT });
+    const vc = (v: number) => ({ v, t: "n", s: v >= 0 ? cellGreen : cellRed });
 
-    const cellGreen = { ...cellC, font: { sz: 10, color: { rgb: "15803D" } } };
-    const cellRed = { ...cellC, font: { sz: 10, color: { rgb: "DC2626" } } };
-
-    const headers = ["Project", "Description", "Project Value (£)", "Basic Hours", "OT Hours", "Labour Cost (£)", "Committed (£)", "Invoiced (£)", "Total Cost (£)", `Target Margin (${targetMargin}%)`, "Actual Margin (£)", "Variance (£)"];
+    const headers = [
+      "Project", "Description", "Contract Value (£)",
+      "Est. Total Cost (£)", "Current Cost (£)", "% Complete",
+      "Current Margin (£)", "Position %",
+      "Est. Labour (£)", "Est. Materials (£)",
+      "Basic Hours", "OT Hours", "Current Labour (£)",
+      "Committed Materials (£)", "Materials Invoice Cleared (£)",
+      "Labour Var. (£)", "Materials Var. (£)", "Planned Margin (£)",
+    ];
 
     const wsRows: object[][] = [
       [{ v: "Project Cost Overview", t: "s", s: titleS }],
-      [{ v: `Rate: £${basicRate}/hr | OT: x${otMultiplier} | Target Margin: ${targetMargin}%`, t: "s", s: { font: { sz: 10, color: { rgb: "666666" } } } }],
+      [{ v: `Rate: £${basicRate}/hr | OT: x${otMultiplier} | Filter: ${projectFilter === "live" ? "Live Projects" : projectFilter === "completed" ? "Completed Projects" : "All Projects"}`, t: "s", s: { font: { sz: 10, color: { rgb: "666666" } } } }],
       headers.map((h) => ({ v: h, t: "s", s: hdr })),
-      ...projectRows.map((r) => {
-        const m = marginCalc(r);
-        return [
-          tc(r.projectnumber),
-          tc(r.description),
-          nc(r.projectValue, cellC),
-          nc(r.basicHours, cellN),
-          nc(r.otHours, cellOT),
-          nc(r.labourCost, cellC),
-          nc(r.committed, cellC),
-          nc(r.invoiced, cellC),
-          nc(r.totalCost, cellC),
-          r.projectValue > 0 ? { v: m.targetMarginValue, t: "n", s: cellC } : { v: "", t: "s", s: cellT },
-          r.projectValue > 0 ? { v: m.actualMargin, t: "n", s: m.actualMargin >= 0 ? cellGreen : cellRed } : { v: "", t: "s", s: cellT },
-          r.projectValue > 0 ? { v: m.variance, t: "n", s: m.variance >= 0 ? cellGreen : cellRed } : { v: "", t: "s", s: cellT },
-        ];
-      }),
+      ...projectRows.map((r) => [
+        tc(r.projectnumber),
+        tc(r.description),
+        nc(r.projectValue, cellC),
+        // Summary
+        nc(r.estTotalCost, cellC),
+        nc(r.totalCost, cellC),
+        r.pctComplete > 0 ? { v: r.pctComplete / 100, t: "n", s: { ...cellN, numFmt: "0%" } } : { v: "", t: "s", s: cellT },
+        r.projectValue > 0 && r.estTotalCost > 0 ? vc(r.currentMargin) : { v: "", t: "s", s: cellT },
+        r.projectValue > 0 && r.estTotalCost > 0 ? { v: r.marginPosition / 100, t: "n", s: { ...cellN, numFmt: "+0.0%;-0.0%", font: { sz: 10, color: { rgb: r.marginPosition >= 0 ? "15803D" : "DC2626" } } } } : { v: "", t: "s", s: cellT },
+        // Detail
+        nc(r.estLabour, cellC),
+        nc(r.estMaterials, cellC),
+        nc(r.basicHours, cellN),
+        nc(r.otHours, cellOT),
+        nc(r.labourCost, cellC),
+        nc(r.committed, cellC),
+        nc(r.invoiced, cellC),
+        r.estLabour > 0 ? vc(r.labourVariance) : { v: "", t: "s", s: cellT },
+        r.estMaterials > 0 ? vc(r.materialsVariance) : { v: "", t: "s", s: cellT },
+        r.projectValue > 0 && r.estTotalCost > 0 ? vc(r.plannedMargin) : { v: "", t: "s", s: cellT },
+      ]),
       [],
       [
         tc("Totals", totL), tc("", totS),
         { v: totals.projectValue, t: "n", s: totC },
+        // Summary
+        { v: totals.estTotalCost, t: "n", s: totC },
+        { v: totals.totalCost, t: "n", s: totC },
+        { v: "", t: "s", s: totS },
+        { v: totals.currentMargin, t: "n", s: { ...totC, font: { sz: 10, bold: true, color: { rgb: totals.currentMargin >= 0 ? "15803D" : "DC2626" } } } },
+        { v: "", t: "s", s: totS },
+        // Detail
+        { v: totals.estLabour, t: "n", s: totC },
+        { v: totals.estMaterials, t: "n", s: totC },
         { v: totals.basicHours, t: "n", s: totS },
         { v: totals.otHours, t: "n", s: { ...totS, font: { sz: 10, bold: true, color: { rgb: "D97706" } } } },
         { v: totals.labourCost, t: "n", s: totC },
         { v: totals.committed, t: "n", s: totC },
         { v: totals.invoiced, t: "n", s: totC },
-        { v: totals.totalCost, t: "n", s: totC },
-        (() => { const m = marginCalc(totals); return { v: m.targetMarginValue, t: "n", s: totC }; })(),
-        (() => { const m = marginCalc(totals); return { v: m.actualMargin, t: "n", s: { ...totC, font: { sz: 10, bold: true, color: { rgb: m.actualMargin >= 0 ? "15803D" : "DC2626" } } } }; })(),
-        (() => { const m = marginCalc(totals); return { v: m.variance, t: "n", s: { ...totC, font: { sz: 10, bold: true, color: { rgb: m.variance >= 0 ? "15803D" : "DC2626" } } } }; })(),
+        { v: "", t: "s", s: totS },
+        { v: "", t: "s", s: totS },
+        { v: "", t: "s", s: totS },
       ],
     ];
 
     const ws = XLSX.utils.aoa_to_sheet(wsRows);
     ws["!merges"] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: 11 } },
-      { s: { r: 1, c: 0 }, e: { r: 1, c: 11 } },
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 17 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 17 } },
     ];
     ws["!cols"] = [
-      { wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 14 }, { wch: 12 },
-      { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 16 },
-      { wch: 16 }, { wch: 14 }, { wch: 16 },
+      { wch: 14 }, { wch: 30 }, { wch: 16 },
+      { wch: 16 }, { wch: 16 }, { wch: 12 },
+      { wch: 16 }, { wch: 12 },
+      { wch: 16 }, { wch: 16 },
+      { wch: 14 }, { wch: 12 }, { wch: 16 },
+      { wch: 16 }, { wch: 20 },
+      { wch: 16 }, { wch: 16 }, { wch: 16 },
     ];
     ws["!rows"] = [{ hpt: 24 }, { hpt: 18 }, { hpt: 22 }];
 
@@ -456,6 +688,18 @@ export default function ProjectCostOverview() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold">Project Cost Overview</h1>
         <div className="flex items-center gap-2">
+          <div className="flex rounded border overflow-hidden">
+            {(["live", "completed", "all"] as const).map((f) => (
+              <button
+                key={f}
+                type="button"
+                onClick={() => setProjectFilter(f)}
+                className={`px-3 py-1 text-sm cursor-pointer ${projectFilter === f ? "bg-[#061b37] text-white" : "hover:bg-gray-100"}`}
+              >
+                {f === "live" ? "Live" : f === "completed" ? "Completed" : "All"}
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             onClick={exportExcel}
@@ -496,16 +740,6 @@ export default function ProjectCostOverview() {
               className="w-20 rounded border px-2 py-1 text-sm text-center"
             />
           </div>
-          <div className="flex items-center gap-2">
-            <label className="text-sm font-medium">Target margin (%):</label>
-            <input
-              type="number"
-              step="1"
-              value={targetMargin}
-              onChange={(e) => setTargetMargin(Number(e.target.value) || 30)}
-              className="w-20 rounded border px-2 py-1 text-sm text-center"
-            />
-          </div>
           <div className="text-xs text-gray-500">
             Labour cost = (basic hrs × £{basicRate}) + (OT hrs × £{basicRate} × {otMultiplier})
           </div>
@@ -523,18 +757,26 @@ export default function ProjectCostOverview() {
           <table className="border-collapse text-sm w-full">
             <thead className="sticky top-0 z-20">
               <tr className="bg-gray-50">
+                {/* Summary columns — visible on initial view */}
                 <th className="border px-3 py-2 text-left sticky left-0 bg-gray-50 z-30 min-w-28">Project</th>
-                <th className="border px-3 py-2 text-left min-w-48">Description</th>
-                <th className="border px-3 py-2 text-right min-w-28">Project Value</th>
+                <th className="border px-3 py-2 text-left sticky left-28 bg-gray-50 z-30 min-w-48">Description</th>
+                <th className="border px-3 py-2 text-right min-w-28">Contract Value</th>
+                <th className="border px-3 py-2 text-right min-w-28">Est. Total Cost</th>
+                <th className="border px-3 py-2 text-right min-w-28">Current Cost</th>
+                <th className="border px-3 py-2 text-right min-w-20">% Complete</th>
+                <th className="border px-3 py-2 text-right min-w-28">Current Margin</th>
+                <th className="border px-3 py-2 text-right min-w-24">Position %</th>
+                {/* Detail columns — scroll right */}
+                <th className="border px-3 py-2 text-right min-w-28 bg-blue-50">Est. Labour</th>
+                <th className="border px-3 py-2 text-right min-w-28 bg-blue-50">Est. Materials</th>
                 <th className="border px-3 py-2 text-right min-w-24">Basic Hours</th>
                 <th className="border px-3 py-2 text-right min-w-20">OT Hours</th>
-                <th className="border px-3 py-2 text-right min-w-28">Labour Cost</th>
-                <th className="border px-3 py-2 text-right min-w-28">Committed</th>
-                <th className="border px-3 py-2 text-right min-w-28">Invoiced</th>
-                <th className="border px-3 py-2 text-right min-w-28">Total Cost</th>
-                <th className="border px-3 py-2 text-right min-w-28">Target Margin</th>
-                <th className="border px-3 py-2 text-right min-w-24">Actual Margin</th>
-                <th className="border px-3 py-2 text-right min-w-28">Variance</th>
+                <th className="border px-3 py-2 text-right min-w-28">Current Labour</th>
+                <th className="border px-3 py-2 text-right min-w-28">Committed Materials</th>
+                <th className="border px-3 py-2 text-right min-w-28">Materials Invoice Cleared</th>
+                <th className="border px-3 py-2 text-right min-w-28">Labour Var.</th>
+                <th className="border px-3 py-2 text-right min-w-28">Materials Var.</th>
+                <th className="border px-3 py-2 text-right min-w-28">Planned Margin</th>
               </tr>
             </thead>
             <tbody>
@@ -545,6 +787,7 @@ export default function ProjectCostOverview() {
                     <tr
                       className={`hover:bg-gray-50 cursor-pointer ${row.hasMultipleItems ? "font-medium" : ""} ${selectedProject === row.projectnumber ? "bg-blue-50 ring-2 ring-blue-300 ring-inset" : ""}`}
                       onClick={() => setSelectedProject(selectedProject === row.projectnumber ? null : row.projectnumber)}
+                      onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, projectnumber: row.projectnumber }); }}
                     >
                       <td className={`border px-3 py-1.5 font-mono text-xs font-medium sticky left-0 z-10 ${selectedProject === row.projectnumber ? "bg-blue-50" : "bg-white"}`}>
                         <div className="flex items-center gap-1">
@@ -560,94 +803,108 @@ export default function ProjectCostOverview() {
                           {row.projectnumber}
                         </div>
                       </td>
-                      <td className="border px-3 py-1.5 text-xs text-gray-600 truncate max-w-64">
+                      <td className={`border px-3 py-1.5 text-xs text-gray-600 truncate max-w-64 sticky left-28 z-10 ${selectedProject === row.projectnumber ? "bg-blue-50" : "bg-white"}`}>
                         {row.description || "–"}
                       </td>
+                      {/* Summary columns */}
                       <td className="border px-3 py-1.5 text-right">{fmtCurrency(row.projectValue)}</td>
                       <td className="border px-3 py-1.5 text-right">
+                        {row.estTotalCost > 0 ? fmtCurrency(row.estTotalCost) : row.projectValue > 0 ? <span className="text-amber-500 text-xs italic">estimates needed</span> : "–"}
+                      </td>
+                      <td className="border px-3 py-1.5 text-right font-medium">{fmtCurrency(row.totalCost)}</td>
+                      <td className="border px-3 py-1.5" onClick={(e) => e.stopPropagation()}>
+                        {row.hasMultipleItems
+                          ? (row.pctComplete > 0 ? `${row.pctComplete}%` : <span className="text-gray-300 text-xs">set per item</span>)
+                          : <PctCell projectnumber={row.projectnumber} itemSeq={parseInt(row.items[0]?.project_item?.split("-").pop() || "1")} value={row.pctComplete} />
+                        }
+                      </td>
+                      <td className={`border px-3 py-1.5 text-right font-medium ${row.projectValue > 0 && row.estTotalCost > 0 ? (row.currentMargin >= 0 ? "text-green-700" : "text-red-600") : ""}`}>
+                        {row.projectValue > 0 && row.estTotalCost > 0 ? fmtSignedCurrency(row.currentMargin) : "–"}
+                      </td>
+                      <td className={`border px-3 py-1.5 text-right font-medium ${row.projectValue > 0 && row.estTotalCost > 0 ? (row.marginPosition >= 0 ? "text-green-700" : "text-red-600") : ""}`}>
+                        {row.projectValue > 0 && row.estTotalCost > 0 ? `${row.marginPosition >= 0 ? "+" : ""}${row.marginPosition.toFixed(1)}%` : "–"}
+                      </td>
+                      {/* Detail columns */}
+                      <td className="border px-3 py-1.5 bg-blue-50/30" onClick={(e) => e.stopPropagation()}>
+                        {row.hasMultipleItems
+                          ? fmtCurrency(row.estLabour)
+                          : <EstCell projectnumber={row.projectnumber} itemSeq={parseInt(row.items[0]?.project_item?.split("-").pop() || "1")} field="est_labour" value={row.estLabour} />
+                        }
+                      </td>
+                      <td className="border px-3 py-1.5 bg-blue-50/30" onClick={(e) => e.stopPropagation()}>
+                        {row.hasMultipleItems
+                          ? fmtCurrency(row.estMaterials)
+                          : <EstCell projectnumber={row.projectnumber} itemSeq={parseInt(row.items[0]?.project_item?.split("-").pop() || "1")} field="est_materials" value={row.estMaterials} />
+                        }
+                      </td>
+                      <td className="border px-3 py-1.5 text-right">
                         {row.basicHours > 0 ? (
-                          <a href={`/timesheets/reports/?highlight=${row.projectnumber}`} className="text-blue-600 hover:underline">{fmt(row.basicHours)}</a>
+                          <a href={`/timesheets/reports/?highlight=${row.projectnumber}`} className="text-blue-600 hover:underline" onClick={(e) => e.stopPropagation()}>{fmt(row.basicHours)}</a>
                         ) : "–"}
                       </td>
                       <td className="border px-3 py-1.5 text-right">
                         {row.otHours > 0 ? (
-                          <a href={`/timesheets/reports/?highlight=${row.projectnumber}`} className="text-amber-600 font-medium hover:underline">{row.otHours.toFixed(2)}</a>
+                          <a href={`/timesheets/reports/?highlight=${row.projectnumber}`} className="text-amber-600 font-medium hover:underline" onClick={(e) => e.stopPropagation()}>{row.otHours.toFixed(2)}</a>
                         ) : "–"}
                       </td>
                       <td className="border px-3 py-1.5 text-right">{fmtCurrency(row.labourCost)}</td>
                       <td className="border px-3 py-1.5 text-right">{fmtCurrency(row.committed)}</td>
                       <td className="border px-3 py-1.5 text-right">{fmtCurrency(row.invoiced)}</td>
-                      <td className="border px-3 py-1.5 text-right font-medium">{fmtCurrency(row.totalCost)}</td>
-                      {(() => {
-                        const m = marginCalc(row);
-                        return (
-                          <>
-                            <td className="border px-3 py-1.5 text-right">{row.projectValue > 0 ? fmtCurrency(m.targetMarginValue) : "–"}</td>
-                            <td className={`border px-3 py-1.5 text-right font-medium ${row.projectValue > 0 ? (m.actualMargin >= 0 ? "text-green-700" : "text-red-600") : ""}`}>
-                              {row.projectValue > 0 ? fmtSignedCurrency(m.actualMargin) : "–"}
-                            </td>
-                            <td className={`border px-3 py-1.5 text-right font-medium ${row.projectValue > 0 ? (m.variance >= 0 ? "text-green-700" : "text-red-600") : ""}`}>
-                              {row.projectValue > 0 ? fmtSignedCurrency(m.variance) : "–"}
-                            </td>
-                          </>
-                        );
-                      })()}
+                      <td className={`border px-3 py-1.5 text-right font-medium ${row.estLabour > 0 ? (row.labourVariance >= 0 ? "text-green-700" : "text-red-600") : ""}`}>
+                        {row.estLabour > 0 ? fmtSignedCurrency(row.labourVariance) : "–"}
+                      </td>
+                      <td className={`border px-3 py-1.5 text-right font-medium ${row.estMaterials > 0 ? (row.materialsVariance >= 0 ? "text-green-700" : "text-red-600") : ""}`}>
+                        {row.estMaterials > 0 ? fmtSignedCurrency(row.materialsVariance) : "–"}
+                      </td>
+                      <td className={`border px-3 py-1.5 text-right font-medium ${row.projectValue > 0 && row.estTotalCost > 0 ? (row.plannedMargin >= 0 ? "text-green-700" : "text-red-600") : ""}`}>
+                        {row.projectValue > 0 && row.estTotalCost > 0 ? fmtSignedCurrency(row.plannedMargin) : "–"}
+                      </td>
                     </tr>
-                    {row.hasMultipleItems && isExpanded && row.items.map((item) => (
-                      <tr key={item.project_item} className="hover:bg-gray-50 text-gray-600">
-                        <td className="border px-3 py-1 font-mono text-xs sticky left-0 bg-white z-10 pl-8">
-                          {item.project_item}
-                        </td>
-                        <td className="border px-3 py-1 text-xs text-gray-400 truncate max-w-64">
-                          {item.description || "–"}
-                        </td>
-                        <td className="border px-3 py-1 text-right text-xs">{fmtCurrency(item.projectValue)}</td>
-                        <td className="border px-3 py-1 text-right text-xs">{fmt(item.basicHours)}</td>
-                        <td className="border px-3 py-1 text-right text-xs">
-                          {item.otHours > 0 ? <span className="text-amber-600">{item.otHours.toFixed(2)}</span> : "–"}
-                        </td>
-                        <td className="border px-3 py-1 text-right text-xs">{fmtCurrency(item.labourCost)}</td>
-                        <td className="border px-3 py-1 text-right text-xs">–</td>
-                        <td className="border px-3 py-1 text-right text-xs">–</td>
-                        <td className="border px-3 py-1 text-right text-xs">{fmtCurrency(item.totalCost)}</td>
-                        <td className="border px-3 py-1 text-right text-xs">–</td>
-                        <td className="border px-3 py-1 text-right text-xs">–</td>
-                        <td className="border px-3 py-1 text-right text-xs">–</td>
-                      </tr>
-                    ))}
+                    {row.hasMultipleItems && isExpanded && row.items.map((item) => {
+                      const dashIdx = item.project_item.lastIndexOf("-");
+                      const itemSeq = parseInt(item.project_item.substring(dashIdx + 1)) || 1;
+                      return (
+                        <tr key={item.project_item} className="hover:bg-gray-50 text-gray-600" onClick={(e) => e.stopPropagation()}>
+                          <td className="border px-3 py-1 font-mono text-xs sticky left-0 bg-white z-10 pl-8">
+                            {item.project_item}
+                          </td>
+                          <td className="border px-3 py-1 text-xs text-gray-400 truncate max-w-64 sticky left-28 bg-white z-10">
+                            {item.description || "–"}
+                          </td>
+                          {/* Summary columns */}
+                          <td className="border px-3 py-1 text-right text-xs">{fmtCurrency(item.projectValue)}</td>
+                          <td className="border px-3 py-1 text-right text-xs">{(item.estLabour + item.estMaterials) > 0 ? fmtCurrency(item.estLabour + item.estMaterials) : "–"}</td>
+                          <td className="border px-3 py-1 text-right text-xs">{fmtCurrency(item.totalCost)}</td>
+                          <td className="border px-3 py-1 text-xs" onClick={(e) => e.stopPropagation()}>
+                            <PctCell projectnumber={row.projectnumber} itemSeq={itemSeq} value={item.pctComplete} />
+                          </td>
+                          <td className="border px-3 py-1 text-right text-xs">–</td>
+                          <td className="border px-3 py-1 text-right text-xs">–</td>
+                          {/* Detail columns */}
+                          <td className="border px-3 py-1 text-xs bg-blue-50/30" onClick={(e) => e.stopPropagation()}>
+                            <EstCell projectnumber={row.projectnumber} itemSeq={itemSeq} field="est_labour" value={item.estLabour} />
+                          </td>
+                          <td className="border px-3 py-1 text-xs bg-blue-50/30" onClick={(e) => e.stopPropagation()}>
+                            <EstCell projectnumber={row.projectnumber} itemSeq={itemSeq} field="est_materials" value={item.estMaterials} />
+                          </td>
+                          <td className="border px-3 py-1 text-right text-xs">{fmt(item.basicHours)}</td>
+                          <td className="border px-3 py-1 text-right text-xs">
+                            {item.otHours > 0 ? <span className="text-amber-600">{item.otHours.toFixed(2)}</span> : "–"}
+                          </td>
+                          <td className="border px-3 py-1 text-right text-xs">{fmtCurrency(item.labourCost)}</td>
+                          <td className="border px-3 py-1 text-right text-xs">–</td>
+                          <td className="border px-3 py-1 text-right text-xs">–</td>
+                          <td className="border px-3 py-1 text-right text-xs">–</td>
+                          <td className="border px-3 py-1 text-right text-xs">–</td>
+                          <td className="border px-3 py-1 text-right text-xs">–</td>
+                          <td className="border px-3 py-1 text-right text-xs">–</td>
+                        </tr>
+                      );
+                    })}
                   </Fragment>
                 );
               })}
 
-              {/* Totals row */}
-              <tr className="bg-gray-50 font-medium sticky bottom-0 z-20">
-                <td className="border px-3 py-2 text-right sticky left-0 bg-gray-50 z-30" colSpan={2}>
-                  Totals
-                </td>
-                <td className="border px-3 py-2 text-right font-bold">{fmtCurrency(totals.projectValue)}</td>
-                <td className="border px-3 py-2 text-right">{fmt(totals.basicHours)}</td>
-                <td className="border px-3 py-2 text-right">
-                  <span className="text-amber-600">{totals.otHours.toFixed(2)}</span>
-                </td>
-                <td className="border px-3 py-2 text-right">{fmtCurrency(totals.labourCost)}</td>
-                <td className="border px-3 py-2 text-right">{fmtCurrency(totals.committed)}</td>
-                <td className="border px-3 py-2 text-right">{fmtCurrency(totals.invoiced)}</td>
-                <td className="border px-3 py-2 text-right font-bold">{fmtCurrency(totals.totalCost)}</td>
-                {(() => {
-                  const m = marginCalc(totals);
-                  return (
-                    <>
-                      <td className="border px-3 py-2 text-right bg-gray-50">{fmtCurrency(m.targetMarginValue)}</td>
-                      <td className={`border px-3 py-2 text-right font-bold bg-gray-50 ${m.actualMargin >= 0 ? "text-green-700" : "text-red-600"}`}>
-                        {fmtSignedCurrency(m.actualMargin)}
-                      </td>
-                      <td className={`border px-3 py-2 text-right font-bold bg-gray-50 ${m.variance >= 0 ? "text-green-700" : "text-red-600"}`}>
-                        {fmtSignedCurrency(m.variance)}
-                      </td>
-                    </>
-                  );
-                })()}
-              </tr>
             </tbody>
           </table>
         </div>
@@ -740,6 +997,28 @@ export default function ProjectCostOverview() {
       {selectedProject && chartData.length === 0 && (
         <div className="mt-6 border rounded p-4 bg-white text-center text-gray-500">
           No spend data available for {selectedProject}
+        </div>
+      )}
+
+      {/* Context menu */}
+      {contextMenu && (
+        <div
+          className="fixed bg-white border rounded shadow-lg z-50 py-1"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              toggleCompleted(contextMenu.projectnumber);
+              setContextMenu(null);
+            }}
+            className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 cursor-pointer"
+          >
+            {completedMap.get(contextMenu.projectnumber)
+              ? `Mark ${contextMenu.projectnumber} as live`
+              : `Mark ${contextMenu.projectnumber} as completed`
+            }
+          </button>
         </div>
       )}
     </div>

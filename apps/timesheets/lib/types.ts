@@ -8,6 +8,7 @@ export type Employee = {
 export type ProjectItem = {
   project_item: string; // e.g. "10160-01"
   line_desc: string;
+  completed?: boolean;
 };
 
 export type TimesheetEntry = {
