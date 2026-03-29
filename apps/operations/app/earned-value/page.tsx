@@ -152,36 +152,30 @@ export default function EarnedValuePage() {
         from += pageSize;
       }
 
-      // Fetch PO spend
+      // Fetch PO spend via po_line_items
       const poByProject = new Map<string, number>();
       const monthlyPO = new Map<string, Map<string, number>>();
-      const poDateMap = new Map<number, string>();
       from = 0;
       while (true) {
         const { data } = await supabase
-          .from("purchase_orders")
-          .select("po_number, created_at")
-          .range(from, from + pageSize - 1);
-        if (!data || data.length === 0) break;
-        for (const d of data) poDateMap.set(d.po_number, d.created_at);
-        if (data.length < pageSize) break;
-        from += pageSize;
-      }
-      from = 0;
-      while (true) {
-        const { data } = await supabase
-          .from("accounts_overview")
-          .select("projectnumber, total_value, po_number")
+          .from("po_line_items")
+          .select("total, active, exped_completed_date, purchase_orders!inner(project_id, created_at, invoice_reference)")
+          .eq("active", true)
           .range(from, from + pageSize - 1);
         if (cancelled) return;
         if (!data || data.length === 0) break;
         for (const d of data) {
-          const val = Number(d.total_value) || 0;
-          poByProject.set(d.projectnumber, (poByProject.get(d.projectnumber) ?? 0) + val);
-          const month = (poDateMap.get(d.po_number) ?? "").slice(0, 7);
+          const po = (d as any).purchase_orders;
+          if (!po?.project_id) continue;
+          const val = Number(d.total) || 0;
+          const proj = po.project_id;
+          poByProject.set(proj, (poByProject.get(proj) ?? 0) + val);
+          // Use received date if available, otherwise PO creation date
+          const dateStr = d.exped_completed_date ?? po.created_at ?? "";
+          const month = dateStr.slice(0, 7);
           if (month) {
-            if (!monthlyPO.has(d.projectnumber)) monthlyPO.set(d.projectnumber, new Map());
-            monthlyPO.get(d.projectnumber)!.set(month, (monthlyPO.get(d.projectnumber)!.get(month) ?? 0) + val);
+            if (!monthlyPO.has(proj)) monthlyPO.set(proj, new Map());
+            monthlyPO.get(proj)!.set(month, (monthlyPO.get(proj)!.get(month) ?? 0) + val);
           }
         }
         if (data.length < pageSize) break;

@@ -17,12 +17,13 @@ type TimesheetEntry = {
   work_date: string;
 };
 
-type PurchaseOrder = {
+type POLineItem = {
   project_id: string;
-  item_seq: number;
-  total_value: number;
+  total: number;
   invoice_reference: string | null;
   created_at: string;
+  exped_completed_date: string | null;
+  category: "committed" | "received" | "invoiced";
 };
 
 type ItemRow = {
@@ -50,6 +51,7 @@ type ProjectRow = {
   otHours: number;
   labourCost: number;
   committed: number;
+  received: number;
   invoiced: number;
   totalCost: number;
   estTotalCost: number;
@@ -109,37 +111,31 @@ export default function ProjectCostOverview() {
         from += pageSize;
       }
 
-      // Purchase orders — paginated
-      let allPo: PurchaseOrder[] = [];
-      const poDateMap = new Map<number, string>();
-      let dateFrom = 0;
-      while (true) {
-        const { data } = await supabase
-          .from("purchase_orders")
-          .select("po_number, created_at")
-          .range(dateFrom, dateFrom + pageSize - 1);
-        if (!data || data.length === 0) break;
-        for (const d of data) poDateMap.set(d.po_number, d.created_at);
-        if (data.length < pageSize) break;
-        dateFrom += pageSize;
-      }
+      // PO line items via purchase_orders join — paginated
+      let allPo: POLineItem[] = [];
       from = 0;
       while (true) {
         const { data } = await supabase
-          .from("accounts_overview")
-          .select("projectnumber, total_value, invoice_reference, po_number")
+          .from("po_line_items")
+          .select("total, active, exped_completed_date, purchase_orders!inner(project_id, created_at, invoice_reference)")
+          .eq("active", true)
           .range(from, from + pageSize - 1);
         if (cancelled) return;
         if (!data || data.length === 0) break;
-        allPo = allPo.concat(
-          data.map((d: { projectnumber: string; total_value: number; invoice_reference: string | null; po_number: number }) => ({
-            project_id: d.projectnumber,
-            item_seq: 0,
-            total_value: Number(d.total_value) || 0,
-            invoice_reference: d.invoice_reference,
-            created_at: poDateMap.get(d.po_number) ?? "",
-          }))
-        );
+        for (const d of data) {
+          const po = (d as any).purchase_orders;
+          if (!po?.project_id) continue;
+          const hasInvoice = !!po.invoice_reference;
+          const hasReceived = !!d.exped_completed_date;
+          allPo.push({
+            project_id: po.project_id,
+            total: Number(d.total) || 0,
+            invoice_reference: po.invoice_reference,
+            created_at: po.created_at ?? "",
+            exped_completed_date: d.exped_completed_date,
+            category: hasInvoice ? "invoiced" : hasReceived ? "received" : "committed",
+          });
+        }
         if (data.length < pageSize) break;
         from += pageSize;
       }
@@ -290,13 +286,16 @@ export default function ProjectCostOverview() {
     }
 
     const committedMap = new Map<string, number>();
+    const receivedMap = new Map<string, number>();
     const invoicedMap = new Map<string, number>();
     for (const po of poData) {
       const proj = po.project_id;
-      if (po.invoice_reference) {
-        invoicedMap.set(proj, (invoicedMap.get(proj) ?? 0) + po.total_value);
+      if (po.category === "invoiced") {
+        invoicedMap.set(proj, (invoicedMap.get(proj) ?? 0) + po.total);
+      } else if (po.category === "received") {
+        receivedMap.set(proj, (receivedMap.get(proj) ?? 0) + po.total);
       } else {
-        committedMap.set(proj, (committedMap.get(proj) ?? 0) + po.total_value);
+        committedMap.set(proj, (committedMap.get(proj) ?? 0) + po.total);
       }
     }
 
@@ -312,6 +311,7 @@ export default function ProjectCostOverview() {
     const allProjects = new Set([
       ...projItemsMap.keys(),
       ...committedMap.keys(),
+      ...receivedMap.keys(),
       ...invoicedMap.keys(),
       ...projectValueMap.keys(),
     ]);
@@ -319,6 +319,7 @@ export default function ProjectCostOverview() {
     const rows: ProjectRow[] = Array.from(allProjects)
       .map((proj) => {
         const committed = committedMap.get(proj) ?? 0;
+        const received = receivedMap.get(proj) ?? 0;
         const invoiced = invoicedMap.get(proj) ?? 0;
         const projectValue = projectValueMap.get(proj) ?? 0;
 
@@ -348,7 +349,7 @@ export default function ProjectCostOverview() {
         const labourCost = totalBasic * basicRate + totalOT * basicRate * otMultiplier;
         const estLabour = items.reduce((s, i) => s + i.estLabour, 0);
         const estMaterials = items.reduce((s, i) => s + i.estMaterials, 0);
-        const actualMaterials = committed + invoiced;
+        const actualMaterials = committed + received + invoiced;
         const totalCost = labourCost + actualMaterials;
 
         return {
@@ -361,6 +362,7 @@ export default function ProjectCostOverview() {
           otHours: totalOT,
           labourCost,
           committed,
+          received,
           invoiced,
           totalCost,
           estTotalCost: estLabour + estMaterials,
@@ -383,7 +385,7 @@ export default function ProjectCostOverview() {
           hasMultipleItems: items.length > 1,
         };
       })
-      .filter((r) => r.basicHours > 0 || r.otHours > 0 || r.committed > 0 || r.invoiced > 0 || r.projectValue > 0)
+      .filter((r) => r.basicHours > 0 || r.otHours > 0 || r.committed > 0 || r.received > 0 || r.invoiced > 0 || r.projectValue > 0)
       .filter((r) => {
         const isCompleted = completedMap.get(r.projectnumber) ?? false;
         if (projectFilter === "live") return !isCompleted;
@@ -414,6 +416,7 @@ export default function ProjectCostOverview() {
         otHours: acc.otHours + r.otHours,
         labourCost: acc.labourCost + r.labourCost,
         committed: acc.committed + r.committed,
+        received: acc.received + r.received,
         invoiced: acc.invoiced + r.invoiced,
         totalCost: acc.totalCost + r.totalCost,
         estTotalCost: acc.estTotalCost + r.estTotalCost,
@@ -422,7 +425,7 @@ export default function ProjectCostOverview() {
         plannedMargin: acc.plannedMargin + r.plannedMargin,
         currentMargin: acc.currentMargin + r.currentMargin,
       }),
-      { projectValue: 0, estLabour: 0, estMaterials: 0, basicHours: 0, otHours: 0, labourCost: 0, committed: 0, invoiced: 0, totalCost: 0, estTotalCost: 0, labourVariance: 0, materialsVariance: 0, plannedMargin: 0, currentMargin: 0 }
+      { projectValue: 0, estLabour: 0, estMaterials: 0, basicHours: 0, otHours: 0, labourCost: 0, committed: 0, received: 0, invoiced: 0, totalCost: 0, estTotalCost: 0, labourVariance: 0, materialsVariance: 0, plannedMargin: 0, currentMargin: 0 }
     );
   }, [projectRows]);
 
@@ -513,7 +516,8 @@ export default function ProjectCostOverview() {
   const chartData = useMemo(() => {
     if (!selectedProject) return [];
 
-    const monthMap = new Map<string, { labourCost: number; poSpend: number }>();
+    const monthMap = new Map<string, { labourCost: number; committed: number; received: number; invoiced: number }>();
+    const empty = () => ({ labourCost: 0, committed: 0, received: 0, invoiced: 0 });
 
     for (const e of tsEntries) {
       const proj = e.project_item.replace(/-\d+$/, "");
@@ -521,18 +525,22 @@ export default function ProjectCostOverview() {
       if (["SHOPWORK-01", "HOLIDAY-01", "TRAINING-01", "SICK-01"].includes(e.project_item)) continue;
       const month = e.work_date?.slice(0, 7);
       if (!month) continue;
-      if (!monthMap.has(month)) monthMap.set(month, { labourCost: 0, poSpend: 0 });
-      const entry = monthMap.get(month)!;
+      if (!monthMap.has(month)) monthMap.set(month, empty());
       const hrs = Number(e.hours);
-      entry.labourCost += e.is_overtime ? hrs * basicRate * otMultiplier : hrs * basicRate;
+      monthMap.get(month)!.labourCost += e.is_overtime ? hrs * basicRate * otMultiplier : hrs * basicRate;
     }
 
     for (const po of poData) {
       if (po.project_id !== selectedProject) continue;
-      const month = po.created_at?.slice(0, 7);
+      // Use best available date: received date for received items, created_at for others
+      const dateStr = (po.category === "received" && po.exped_completed_date) ? po.exped_completed_date : po.created_at;
+      const month = dateStr?.slice(0, 7);
       if (!month) continue;
-      if (!monthMap.has(month)) monthMap.set(month, { labourCost: 0, poSpend: 0 });
-      monthMap.get(month)!.poSpend += po.total_value;
+      if (!monthMap.has(month)) monthMap.set(month, empty());
+      const entry = monthMap.get(month)!;
+      if (po.category === "invoiced") entry.invoiced += po.total;
+      else if (po.category === "received") entry.received += po.total;
+      else entry.committed += po.total;
     }
 
     const sorted = Array.from(monthMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
@@ -540,18 +548,21 @@ export default function ProjectCostOverview() {
     let cumLabour = 0;
     let cumPO = 0;
     return sorted.map(([month, data]) => {
-      cumTotal += data.labourCost + data.poSpend;
+      const poTotal = data.committed + data.received + data.invoiced;
+      cumTotal += data.labourCost + poTotal;
       cumLabour += data.labourCost;
-      cumPO += data.poSpend;
+      cumPO += poTotal;
       const [y, m] = month.split("-");
       const label = new Date(Number(y), Number(m) - 1).toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
       return {
         month: label,
-        "Labour Cost": Math.round(data.labourCost * 100) / 100,
-        "PO Spend": Math.round(data.poSpend * 100) / 100,
+        "Labour": Math.round(data.labourCost * 100) / 100,
+        "Committed": Math.round(data.committed * 100) / 100,
+        "Received": Math.round(data.received * 100) / 100,
+        "Invoice Cleared": Math.round(data.invoiced * 100) / 100,
         "Cumulative Total": Math.round(cumTotal * 100) / 100,
         "Cumulative Labour": Math.round(cumLabour * 100) / 100,
-        "Cumulative PO": Math.round(cumPO * 100) / 100,
+        "Cumulative Materials": Math.round(cumPO * 100) / 100,
       };
     });
   }, [selectedProject, tsEntries, poData, basicRate, otMultiplier]);
@@ -592,7 +603,7 @@ export default function ProjectCostOverview() {
       "Current Margin (£)", "Position %",
       "Est. Labour (£)", "Est. Materials (£)",
       "Basic Hours", "OT Hours", "Current Labour (£)",
-      "Committed Materials (£)", "Materials Invoice Cleared (£)",
+      "Committed (£)", "Received (£)", "Invoice Cleared (£)",
       "Labour Var. (£)", "Materials Var. (£)", "Planned Margin (£)",
     ];
 
@@ -617,6 +628,7 @@ export default function ProjectCostOverview() {
         nc(r.otHours, cellOT),
         nc(r.labourCost, cellC),
         nc(r.committed, cellC),
+        nc(r.received, cellC),
         nc(r.invoiced, cellC),
         r.estLabour > 0 ? vc(r.labourVariance) : { v: "", t: "s", s: cellT },
         r.estMaterials > 0 ? vc(r.materialsVariance) : { v: "", t: "s", s: cellT },
@@ -639,6 +651,7 @@ export default function ProjectCostOverview() {
         { v: totals.otHours, t: "n", s: { ...totS, font: { sz: 10, bold: true, color: { rgb: "D97706" } } } },
         { v: totals.labourCost, t: "n", s: totC },
         { v: totals.committed, t: "n", s: totC },
+        { v: totals.received, t: "n", s: totC },
         { v: totals.invoiced, t: "n", s: totC },
         { v: "", t: "s", s: totS },
         { v: "", t: "s", s: totS },
@@ -648,8 +661,8 @@ export default function ProjectCostOverview() {
 
     const ws = XLSX.utils.aoa_to_sheet(wsRows);
     ws["!merges"] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: 17 } },
-      { s: { r: 1, c: 0 }, e: { r: 1, c: 17 } },
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 18 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 18 } },
     ];
     ws["!cols"] = [
       { wch: 14 }, { wch: 30 }, { wch: 16 },
@@ -657,7 +670,7 @@ export default function ProjectCostOverview() {
       { wch: 16 }, { wch: 12 },
       { wch: 16 }, { wch: 16 },
       { wch: 14 }, { wch: 12 }, { wch: 16 },
-      { wch: 16 }, { wch: 20 },
+      { wch: 16 }, { wch: 16 }, { wch: 20 },
       { wch: 16 }, { wch: 16 }, { wch: 16 },
     ];
     ws["!rows"] = [{ hpt: 24 }, { hpt: 18 }, { hpt: 22 }];
@@ -772,8 +785,9 @@ export default function ProjectCostOverview() {
                 <th className="border px-3 py-2 text-right min-w-24">Basic Hours</th>
                 <th className="border px-3 py-2 text-right min-w-20">OT Hours</th>
                 <th className="border px-3 py-2 text-right min-w-28">Current Labour</th>
-                <th className="border px-3 py-2 text-right min-w-28">Committed Materials</th>
-                <th className="border px-3 py-2 text-right min-w-28">Materials Invoice Cleared</th>
+                <th className="border px-3 py-2 text-right min-w-28">Committed</th>
+                <th className="border px-3 py-2 text-right min-w-28">Received</th>
+                <th className="border px-3 py-2 text-right min-w-28">Invoice Cleared</th>
                 <th className="border px-3 py-2 text-right min-w-28">Labour Var.</th>
                 <th className="border px-3 py-2 text-right min-w-28">Materials Var.</th>
                 <th className="border px-3 py-2 text-right min-w-28">Planned Margin</th>
@@ -849,6 +863,7 @@ export default function ProjectCostOverview() {
                       </td>
                       <td className="border px-3 py-1.5 text-right">{fmtCurrency(row.labourCost)}</td>
                       <td className="border px-3 py-1.5 text-right">{fmtCurrency(row.committed)}</td>
+                      <td className="border px-3 py-1.5 text-right">{fmtCurrency(row.received)}</td>
                       <td className="border px-3 py-1.5 text-right">{fmtCurrency(row.invoiced)}</td>
                       <td className={`border px-3 py-1.5 text-right font-medium ${row.estLabour > 0 ? (row.labourVariance >= 0 ? "text-green-700" : "text-red-600") : ""}`}>
                         {row.estLabour > 0 ? fmtSignedCurrency(row.labourVariance) : "–"}
@@ -892,6 +907,7 @@ export default function ProjectCostOverview() {
                             {item.otHours > 0 ? <span className="text-amber-600">{item.otHours.toFixed(2)}</span> : "–"}
                           </td>
                           <td className="border px-3 py-1 text-right text-xs">{fmtCurrency(item.labourCost)}</td>
+                          <td className="border px-3 py-1 text-right text-xs">–</td>
                           <td className="border px-3 py-1 text-right text-xs">–</td>
                           <td className="border px-3 py-1 text-right text-xs">–</td>
                           <td className="border px-3 py-1 text-right text-xs">–</td>
@@ -958,8 +974,10 @@ export default function ProjectCostOverview() {
                   <span style={{ color: hiddenSeries.has(value) ? "#ccc" : undefined, cursor: "pointer" }}>{value}</span>
                 )}
               />
-              <Bar yAxisId="left" dataKey="Labour Cost" stackId="spend" fill="#061b37" hide={hiddenSeries.has("Labour Cost")} />
-              <Bar yAxisId="left" dataKey="PO Spend" stackId="spend" fill="#97caeb" hide={hiddenSeries.has("PO Spend")} />
+              <Bar yAxisId="left" dataKey="Labour" stackId="spend" fill="#061b37" hide={hiddenSeries.has("Labour")} />
+              <Bar yAxisId="left" dataKey="Committed" stackId="spend" fill="#bfdbfe" hide={hiddenSeries.has("Committed")} />
+              <Bar yAxisId="left" dataKey="Received" stackId="spend" fill="#60a5fa" hide={hiddenSeries.has("Received")} />
+              <Bar yAxisId="left" dataKey="Invoice Cleared" stackId="spend" fill="#97caeb" hide={hiddenSeries.has("Invoice Cleared")} />
               <Line
                 yAxisId="right"
                 type="monotone"
@@ -982,12 +1000,12 @@ export default function ProjectCostOverview() {
               <Line
                 yAxisId="right"
                 type="monotone"
-                dataKey="Cumulative PO"
-                stroke="#97caeb"
+                dataKey="Cumulative Materials"
+                stroke="#60a5fa"
                 strokeWidth={1.5}
                 strokeDasharray="5 5"
                 dot={{ r: 2 }}
-                hide={hiddenSeries.has("Cumulative PO")}
+                hide={hiddenSeries.has("Cumulative Materials")}
               />
             </ComposedChart>
           </ResponsiveContainer>
