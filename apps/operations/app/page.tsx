@@ -814,7 +814,7 @@ export default function ProjectCostOverview() {
                               {isExpanded ? "▼" : "▶"}
                             </button>
                           )}
-                          {row.projectnumber}
+                          <a href={`/operations/projects/${row.projectnumber}`} onClick={(e) => e.stopPropagation()} className="hover:underline hover:text-blue-600">{row.projectnumber}</a>
                         </div>
                       </td>
                       <td className={`border px-3 py-1.5 text-xs text-gray-600 truncate max-w-64 sticky left-28 z-10 ${selectedProject === row.projectnumber ? "bg-blue-50" : "bg-white"}`}>

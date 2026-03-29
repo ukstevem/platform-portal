@@ -7,7 +7,7 @@
 create table if not exists project_items_commercial (
   id                      uuid primary key default gen_random_uuid(),
   project_item_id         uuid not null references project_register_items(id) on delete cascade,
-  projectnumber           text not null,
+  projectnumber           text not null references project_register(projectnumber),
   item_seq                integer not null,
   pct_complete            integer not null default 0,        -- manual 0-100
   planned_start_date      date,
