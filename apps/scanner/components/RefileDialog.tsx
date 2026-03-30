@@ -7,10 +7,14 @@ const DOC_SERVICE_URL = process.env.NEXT_PUBLIC_DOC_SERVICE_URL ?? "";
 
 type FilingRule = { type_code: string; document_type: string };
 type Asset = { asset_code: string; asset_name: string };
-type DocDef = { doc_code: string; doc_name: string; type_code: string };
+type DocDef = { doc_code: string; doc_name: string; type_code: string; meta_required: boolean };
+type MetaField = { field_name: string; field_label: string; field_type: string; required: boolean; sort_order: number };
+type Supplier = { id: number; name: string };
+type SupplierEmployee = { id: number; employee_name: string };
 
 type Props = {
   jobId: string;
+  errorCode?: string | null;
   initialTypeCode: string | null;
   initialAssetCode: string | null;
   initialDocCode: string | null;
@@ -36,6 +40,7 @@ function getRecentWeeks(count: number): string[] {
 
 export function RefileDialog({
   jobId,
+  errorCode,
   initialTypeCode,
   initialAssetCode,
   initialDocCode,
@@ -54,8 +59,19 @@ export function RefileDialog({
   const [docDefs, setDocDefs] = useState<DocDef[]>([]);
   const [filedPeriods, setFiledPeriods] = useState<string[]>([]);
 
+  // Meta fields
+  const [metaFields, setMetaFields] = useState<MetaField[]>([]);
+  const [metaValues, setMetaValues] = useState<Record<string, unknown>>({});
+
+  // Supplier/employee data
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [supplierEmployees, setSupplierEmployees] = useState<SupplierEmployee[]>([]);
+  const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<number[]>([]);
+
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const isMetaRequired = errorCode === "META_REQUIRED";
 
   // Load lookup data
   useEffect(() => {
@@ -75,11 +91,48 @@ export function RefileDialog({
 
     supabase
       .from("document_definition")
-      .select("doc_code, doc_name, type_code")
+      .select("doc_code, doc_name, type_code, meta_required")
       .eq("active", true)
       .order("doc_code")
       .then(({ data }) => setDocDefs(data ?? []));
+
+    supabase
+      .from("suppliers")
+      .select("id, name")
+      .order("name")
+      .then(({ data }) => setSuppliers(data ?? []));
   }, []);
+
+  // Load meta fields when doc code changes
+  useEffect(() => {
+    if (!docCode) {
+      setMetaFields([]);
+      return;
+    }
+    supabase
+      .from("document_definition_meta")
+      .select("field_name, field_label, field_type, required, sort_order")
+      .eq("doc_code", docCode)
+      .order("sort_order")
+      .then(({ data }) => setMetaFields(data ?? []));
+  }, [docCode]);
+
+  // Load supplier employees when supplier changes
+  const supplierId = metaValues.supplier_id as number | undefined;
+  useEffect(() => {
+    if (!supplierId) {
+      setSupplierEmployees([]);
+      setSelectedEmployeeIds([]);
+      return;
+    }
+    supabase
+      .from("supplier_employee")
+      .select("id, employee_name")
+      .eq("supplier_id", supplierId)
+      .eq("active", true)
+      .order("employee_name")
+      .then(({ data }) => setSupplierEmployees(data ?? []));
+  }, [supplierId]);
 
   // Filter doc codes by selected type code
   const filteredDocDefs = typeCode
@@ -111,9 +164,22 @@ export function RefileDialog({
     ? allWeeks
     : allWeeks.filter((w) => !filedPeriods.includes(w));
 
+  const toggleEmployee = (id: number) => {
+    setSelectedEmployeeIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
   const handleSubmit = async () => {
     setError(null);
     setSubmitting(true);
+
+    // Build metadata payload
+    const metadata: Record<string, unknown> = { ...metaValues };
+    if (selectedEmployeeIds.length > 0) {
+      metadata.employee_ids = selectedEmployeeIds;
+    }
+
     try {
       const res = await fetch(`${DOC_SERVICE_URL}/api/scan/${jobId}/refile`, {
         method: "POST",
@@ -124,6 +190,7 @@ export function RefileDialog({
           doc_code: docCode,
           period,
           skip_duplicate_check: skipDuplicate,
+          meta: Object.keys(metadata).length > 0 ? metadata : undefined,
         }),
       });
       const data = await res.json();
@@ -131,6 +198,20 @@ export function RefileDialog({
         setError(data.details?.join(", ") ?? data.error ?? "Refile failed");
         return;
       }
+
+      // Update supplier_employee induction records
+      if (selectedEmployeeIds.length > 0) {
+        for (const empId of selectedEmployeeIds) {
+          await supabase
+            .from("supplier_employee")
+            .update({
+              induction_date: new Date().toISOString().split("T")[0],
+              induction_scan_id: jobId,
+            })
+            .eq("id", empId);
+        }
+      }
+
       onRefiled();
     } catch {
       setError("Failed to connect to document service");
@@ -139,15 +220,27 @@ export function RefileDialog({
     }
   };
 
+  const hasRequiredMeta = metaFields.length === 0 || metaFields.every((f) => {
+    if (!f.required) return true;
+    if (f.field_type === "supplier") return !!metaValues.supplier_id;
+    if (f.field_type === "supplier_employees") return selectedEmployeeIds.length > 0;
+    return !!metaValues[f.field_name];
+  });
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
       <div
-        className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md"
+        className="bg-white rounded-lg shadow-xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="text-lg font-semibold mb-4" style={{ color: "var(--pss-navy)" }}>
-          Refile Document
+        <h3 className="text-lg font-semibold mb-1" style={{ color: "var(--pss-navy)" }}>
+          {isMetaRequired ? "Complete Document Information" : "Refile Document"}
         </h3>
+        {isMetaRequired && (
+          <p className="text-sm text-amber-600 mb-4">
+            This document requires additional information before it can be filed.
+          </p>
+        )}
 
         <div className="space-y-3">
           {/* Type Code */}
@@ -159,6 +252,8 @@ export function RefileDialog({
                 setTypeCode(e.target.value);
                 setDocCode("");
                 setPeriod("");
+                setMetaValues({});
+                setSelectedEmployeeIds([]);
               }}
               className="w-full border rounded px-3 py-2 text-sm"
             >
@@ -199,6 +294,8 @@ export function RefileDialog({
               onChange={(e) => {
                 setDocCode(e.target.value);
                 setPeriod("");
+                setMetaValues({});
+                setSelectedEmployeeIds([]);
               }}
               className="w-full border rounded px-3 py-2 text-sm"
             >
@@ -236,6 +333,90 @@ export function RefileDialog({
             </select>
           </div>
 
+          {/* Dynamic meta fields */}
+          {metaFields.map((field) => {
+            if (field.field_type === "supplier") {
+              return (
+                <div key={field.field_name}>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    {field.field_label}
+                    {field.required && <span className="text-red-500 ml-1">*</span>}
+                  </label>
+                  <select
+                    value={(metaValues.supplier_id as string) ?? ""}
+                    onChange={(e) => {
+                      setMetaValues((prev) => ({ ...prev, supplier_id: e.target.value ? Number(e.target.value) : undefined }));
+                      setSelectedEmployeeIds([]);
+                    }}
+                    className="w-full border rounded px-3 py-2 text-sm"
+                  >
+                    <option value="">Select supplier...</option>
+                    {suppliers.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              );
+            }
+
+            if (field.field_type === "supplier_employees") {
+              if (!supplierId) return null;
+              return (
+                <div key={field.field_name}>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    {field.field_label}
+                    {field.required && <span className="text-red-500 ml-1">*</span>}
+                    {selectedEmployeeIds.length > 0 && (
+                      <span className="text-gray-400 font-normal ml-1">
+                        ({selectedEmployeeIds.length} selected)
+                      </span>
+                    )}
+                  </label>
+                  {supplierEmployees.length === 0 ? (
+                    <p className="text-sm text-gray-400 italic">No employees registered for this supplier</p>
+                  ) : (
+                    <div className="border rounded max-h-40 overflow-y-auto">
+                      {supplierEmployees.map((emp) => (
+                        <label
+                          key={emp.id}
+                          className={`flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 ${
+                            selectedEmployeeIds.includes(emp.id) ? "bg-blue-50" : ""
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedEmployeeIds.includes(emp.id)}
+                            onChange={() => toggleEmployee(emp.id)}
+                            className="rounded"
+                          />
+                          {emp.employee_name}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            }
+
+            // Default text field
+            return (
+              <div key={field.field_name}>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  {field.field_label}
+                  {field.required && <span className="text-red-500 ml-1">*</span>}
+                </label>
+                <input
+                  type={field.field_type === "date" ? "date" : "text"}
+                  value={(metaValues[field.field_name] as string) ?? ""}
+                  onChange={(e) => setMetaValues((prev) => ({ ...prev, [field.field_name]: e.target.value }))}
+                  className="w-full border rounded px-3 py-2 text-sm"
+                />
+              </div>
+            );
+          })}
+
           {/* Skip duplicate check */}
           <label className="flex items-center gap-2 text-sm text-gray-600">
             <input
@@ -261,11 +442,11 @@ export function RefileDialog({
           </button>
           <button
             onClick={handleSubmit}
-            disabled={submitting || !typeCode || !assetCode || !docCode || !period}
+            disabled={submitting || !typeCode || !assetCode || !docCode || !period || !hasRequiredMeta}
             className="px-4 py-2 text-sm text-white rounded disabled:opacity-50"
             style={{ backgroundColor: "var(--pss-navy)" }}
           >
-            {submitting ? "Refiling..." : "Refile"}
+            {submitting ? "Filing..." : isMetaRequired ? "Complete & File" : "Refile"}
           </button>
         </div>
       </div>

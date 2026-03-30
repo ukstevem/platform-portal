@@ -296,6 +296,7 @@ export default function HistoryPage() {
       {refileJob && (
         <RefileDialog
           jobId={refileJob.id}
+          errorCode={refileJob.error_code}
           initialTypeCode={refileJob.type_code}
           initialAssetCode={refileJob.asset_code}
           initialDocCode={refileJob.doc_code}
