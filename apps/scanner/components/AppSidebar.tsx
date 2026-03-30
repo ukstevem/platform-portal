@@ -13,7 +13,8 @@ export function AppSidebar() {
           heading: "Scanner",
           items: [
             { label: "Upload", href: "/scanner/" },
-            { label: "History", href: "/scanner/history" },
+            { label: "Document Library", href: "/scanner/history" },
+            { label: "Assets", href: "/scanner/assets" },
             { label: "Filing Rules", href: "/scanner/rules" },
           ],
         },
