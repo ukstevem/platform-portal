@@ -27,7 +27,7 @@ ON CONFLICT (doc_code, field_name) DO NOTHING;
 -- Supplier employees table
 CREATE TABLE IF NOT EXISTS supplier_employee (
   id              serial PRIMARY KEY,
-  supplier_id     int NOT NULL REFERENCES suppliers(id),
+  supplier_id     uuid NOT NULL REFERENCES suppliers(id),
   employee_name   text NOT NULL,
   induction_date  date,
   induction_scan_id uuid REFERENCES document_incoming_scan(id),

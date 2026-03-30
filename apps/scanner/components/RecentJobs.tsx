@@ -21,6 +21,7 @@ type ScanJob = {
   error_code: string | null;
   error_message: string | null;
   lifecycle_status: string | null;
+  override_metadata: Record<string, unknown> | null;
   created_at: string;
 };
 
@@ -33,7 +34,7 @@ export function RecentJobs() {
   const fetchJobs = async () => {
     const { data } = await supabase
       .from("document_incoming_scan")
-      .select("id, file_name, status, type_code, asset_code, doc_code, period, document_type, filed_path, error_code, error_message, lifecycle_status, created_at")
+      .select("id, file_name, status, type_code, asset_code, doc_code, period, document_type, filed_path, error_code, error_message, lifecycle_status, override_metadata, created_at")
       .order("created_at", { ascending: false })
       .limit(10);
     setJobs(data ?? []);
@@ -149,10 +150,10 @@ export function RecentJobs() {
         <RefileDialog
           jobId={refileJob.id}
           errorCode={refileJob.error_code}
-          initialTypeCode={refileJob.type_code}
-          initialAssetCode={refileJob.asset_code}
-          initialDocCode={refileJob.doc_code}
-          initialPeriod={refileJob.period}
+          initialTypeCode={refileJob.type_code ?? (refileJob.override_metadata?.type_code as string) ?? null}
+          initialAssetCode={refileJob.asset_code ?? (refileJob.override_metadata?.asset_code as string) ?? null}
+          initialDocCode={refileJob.doc_code ?? (refileJob.override_metadata?.doc_code as string) ?? null}
+          initialPeriod={refileJob.period ?? (refileJob.override_metadata?.period as string) ?? null}
           onClose={() => setRefileJob(null)}
           onRefiled={() => {
             setRefileJob(null);

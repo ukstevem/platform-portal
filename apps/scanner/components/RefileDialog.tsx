@@ -9,7 +9,7 @@ type FilingRule = { type_code: string; document_type: string };
 type Asset = { asset_code: string; asset_name: string };
 type DocDef = { doc_code: string; doc_name: string; type_code: string; meta_required: boolean };
 type MetaField = { field_name: string; field_label: string; field_type: string; required: boolean; sort_order: number };
-type Supplier = { id: number; name: string };
+type Supplier = { id: string; name: string };
 type SupplierEmployee = { id: number; employee_name: string };
 
 type Props = {
@@ -118,7 +118,7 @@ export function RefileDialog({
   }, [docCode]);
 
   // Load supplier employees when supplier changes
-  const supplierId = metaValues.supplier_id as number | undefined;
+  const supplierId = metaValues.supplier_id as string | undefined;
   useEffect(() => {
     if (!supplierId) {
       setSupplierEmployees([]);
@@ -345,7 +345,7 @@ export function RefileDialog({
                   <select
                     value={(metaValues.supplier_id as string) ?? ""}
                     onChange={(e) => {
-                      setMetaValues((prev) => ({ ...prev, supplier_id: e.target.value ? Number(e.target.value) : undefined }));
+                      setMetaValues((prev) => ({ ...prev, supplier_id: e.target.value || undefined }));
                       setSelectedEmployeeIds([]);
                     }}
                     className="w-full border rounded px-3 py-2 text-sm"
