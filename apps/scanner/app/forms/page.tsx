@@ -12,6 +12,7 @@ type Asset = {
   asset_name: string;
   category: string;
   location: string | null;
+  doc_code: string | null;
   active: boolean;
 };
 
@@ -65,7 +66,7 @@ export default function FormsPage() {
   const fetchAssets = useCallback(async () => {
     const { data } = await supabase
       .from("asset_register")
-      .select("id, asset_code, asset_name, category, location, active")
+      .select("id, asset_code, asset_name, category, location, doc_code, active")
       .like("category", "%-form")
       .order("asset_code");
     setAssets(data ?? []);
@@ -207,6 +208,7 @@ export default function FormsPage() {
       asset_name: formName,
       category: generatedCategory,
       location: formLocation || null,
+      doc_code: activeDocCode,
     });
 
     if (error) {
@@ -297,13 +299,9 @@ export default function FormsPage() {
       })
     : [];
 
-  // Find linked doc definition for display
   const getLinkedDocDef = (asset: Asset): DocDef | undefined => {
-    const parts = asset.asset_code.split("-");
-    if (parts.length >= 2) {
-      return docDefs.find((d) => d.doc_code === parts[1]);
-    }
-    return undefined;
+    if (!asset.doc_code) return undefined;
+    return docDefs.find((d) => d.doc_code === asset.doc_code);
   };
 
   if (authLoading) return <div className="p-6 text-gray-500">Loading...</div>;
@@ -593,7 +591,7 @@ export default function FormsPage() {
                     <td className="py-2 pr-4 text-gray-600 text-xs">{asset.location ?? "—"}</td>
                     <td className="py-2 text-right">
                       <button
-                        onClick={() => { setQrAsset(asset); setQrDocCode(linked?.doc_code ?? ""); }}
+                        onClick={() => { setQrAsset(asset); setQrDocCode(asset.doc_code ?? ""); }}
                         className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100"
                       >
                         QR
