@@ -14,7 +14,8 @@ export function AppSidebar() {
           items: [
             { label: "Upload", href: "/scanner/" },
             { label: "Document Library", href: "/scanner/history" },
-            { label: "Assets", href: "/scanner/assets" },
+            { label: "Physical Assets", href: "/scanner/assets" },
+            { label: "Form Templates", href: "/scanner/forms" },
             { label: "Filing Rules", href: "/scanner/rules" },
           ],
         },
