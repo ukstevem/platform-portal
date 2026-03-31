@@ -28,9 +28,12 @@ type ScanJob = {
   created_at: string;
 };
 
+type DocDef = { doc_code: string; doc_name: string };
+
 export default function HistoryPage() {
   const { user, loading: authLoading } = useAuth();
   const [jobs, setJobs] = useState<ScanJob[]>([]);
+  const [docDefs, setDocDefs] = useState<DocDef[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Filters
@@ -45,6 +48,11 @@ export default function HistoryPage() {
 
   useEffect(() => {
     if (!user) return;
+    supabase
+      .from("document_definition")
+      .select("doc_code, doc_name")
+      .eq("active", true)
+      .then(({ data }) => setDocDefs(data ?? []));
     supabase
       .from("document_incoming_scan")
       .select("*")
@@ -207,7 +215,7 @@ export default function HistoryPage() {
               <tr className="border-b text-left text-gray-500">
                 <th className="py-2 pr-4 font-medium w-16"></th>
                 <th className="py-2 pr-4 font-medium">Status</th>
-                <th className="py-2 pr-4 font-medium">Asset</th>
+                <th className="py-2 pr-4 font-medium">Asset Code</th>
                 <th className="py-2 pr-4 font-medium">Document</th>
                 <th className="py-2 pr-4 font-medium">Period</th>
                 <th className="py-2 pr-4 font-medium">Filed As</th>
@@ -242,9 +250,10 @@ export default function HistoryPage() {
                     <StatusBadge status={job.status} errorCode={job.error_code} error={job.error_message} />
                   </td>
                   <td className="py-2 pr-4 font-mono text-xs font-bold">{job.asset_code ?? "—"}</td>
-                  <td className="py-2 pr-4">
-                    <span className="font-mono text-xs font-bold">{job.type_code ?? "—"}</span>
-                    {job.doc_code && <span className="text-gray-500 ml-1">/ {job.doc_code}</span>}
+                  <td className="py-2 pr-4 text-xs">
+                    {job.doc_code
+                      ? (docDefs.find((d) => d.doc_code === job.doc_code)?.doc_name ?? job.doc_code)
+                      : "—"}
                   </td>
                   <td className="py-2 pr-4 text-gray-600 text-xs">{job.period ?? "—"}</td>
                   <td className="py-2 pr-4 font-mono text-xs truncate max-w-64" title={job.filed_path ?? undefined}>
