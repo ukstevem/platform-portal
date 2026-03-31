@@ -59,6 +59,9 @@ export default function FormsPage() {
   const [docCode, setDocCode] = useState("");
   const [interval, setInterval_] = useState("");
   const [location, setLocation] = useState("");
+  const [metaRequired, setMetaRequired] = useState(false);
+  const [metaFields, setMetaFields] = useState<{ field_name: string; field_label: string; field_type: string; required: boolean }[]>([]);
+  const [existingMetaFieldTypes, setExistingMetaFieldTypes] = useState<{ field_type: string; label: string; count: number }[]>([]);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -95,6 +98,21 @@ export default function FormsPage() {
       .eq("active", true)
       .order("type_code")
       .then(({ data }) => setFilingRules(data ?? []));
+    // Load existing meta field definitions for reuse suggestions
+    supabase
+      .from("document_definition_meta")
+      .select("field_name, field_label, field_type")
+      .then(({ data }) => {
+        const types = new Map<string, number>();
+        (data ?? []).forEach((f) => {
+          types.set(`${f.field_type}::${f.field_label}`, (types.get(`${f.field_type}::${f.field_label}`) ?? 0) + 1);
+        });
+        setExistingMetaFieldTypes(
+          [...types.entries()]
+            .map(([key, count]) => ({ field_type: key.split("::")[0], label: key.split("::")[1], count }))
+            .sort((a, b) => b.count - a.count)
+        );
+      });
   }, [user, fetchAssets, fetchDocDefs]);
 
   const formCategories = [...new Set(assets.map((a) => a.category))].sort();
@@ -163,6 +181,8 @@ export default function FormsPage() {
     setDocCode("");
     setInterval_("");
     setLocation("");
+    setMetaRequired(false);
+    setMetaFields([]);
     setFormError(null);
   };
 
@@ -187,11 +207,32 @@ export default function FormsPage() {
         type_code: typeCode,
         category: generatedCategory,
         interval_days: interval ? parseInt(interval, 10) : null,
+        meta_required: metaRequired,
       });
       if (error) {
         setFormError(`Definition: ${error.message}`);
         setSaving(false);
         return;
+      }
+
+      // Create meta field definitions
+      if (metaRequired && metaFields.length > 0) {
+        const metaRows = metaFields.map((f, i) => ({
+          doc_code: activeDocCode,
+          field_name: f.field_name,
+          field_label: f.field_label,
+          field_type: f.field_type,
+          required: f.required,
+          sort_order: i + 1,
+        }));
+        const { error: metaError } = await supabase
+          .from("document_definition_meta")
+          .insert(metaRows);
+        if (metaError) {
+          setFormError(`Meta fields: ${metaError.message}`);
+          setSaving(false);
+          return;
+        }
       }
     }
 
@@ -480,6 +521,127 @@ export default function FormsPage() {
                 placeholder="e.g. Carrwood Road"
                 className="w-full md:w-1/3 border rounded px-3 py-2 text-sm"
               />
+            </div>
+          )}
+
+          {/* Additional info required? */}
+          {typeCode && area && formName && activeDocCode && (
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1">
+                Does this form need additional information before filing?
+              </label>
+              <p className="text-xs text-gray-500 mb-2">
+                If yes, the document will be held for review until the extra details are provided
+              </p>
+              <div className="flex gap-4 mb-3">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="radio"
+                    checked={!metaRequired}
+                    onChange={() => { setMetaRequired(false); setMetaFields([]); }}
+                  />
+                  No — file automatically from QR code
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="radio"
+                    checked={metaRequired}
+                    onChange={() => setMetaRequired(true)}
+                  />
+                  Yes — hold for review
+                </label>
+              </div>
+
+              {metaRequired && (
+                <div className="ml-4 border-l-2 border-blue-200 pl-4 space-y-3">
+                  <p className="text-xs text-gray-600 font-medium">What information is needed?</p>
+
+                  {metaFields.map((field, idx) => (
+                    <div key={idx} className="flex gap-2 items-start">
+                      <div className="flex-1">
+                        <input
+                          type="text"
+                          value={field.field_label}
+                          onChange={(e) => {
+                            const updated = [...metaFields];
+                            updated[idx].field_label = e.target.value;
+                            updated[idx].field_name = e.target.value
+                              .toLowerCase()
+                              .replace(/[^a-z0-9 ]/g, "")
+                              .replace(/ +/g, "_");
+                            setMetaFields(updated);
+                          }}
+                          placeholder="Field label (e.g. Contractor Name)"
+                          className="w-full border rounded px-2 py-1.5 text-sm"
+                        />
+                      </div>
+                      <select
+                        value={field.field_type}
+                        onChange={(e) => {
+                          const updated = [...metaFields];
+                          updated[idx].field_type = e.target.value;
+                          setMetaFields(updated);
+                        }}
+                        className="border rounded px-2 py-1.5 text-sm w-40"
+                      >
+                        <option value="text">Text</option>
+                        <option value="date">Date</option>
+                        <option value="select">Select list</option>
+                        <option value="supplier">Supplier</option>
+                        <option value="supplier_employees">Supplier Employees</option>
+                      </select>
+                      <label className="flex items-center gap-1 text-xs text-gray-500 whitespace-nowrap">
+                        <input
+                          type="checkbox"
+                          checked={field.required}
+                          onChange={(e) => {
+                            const updated = [...metaFields];
+                            updated[idx].required = e.target.checked;
+                            setMetaFields(updated);
+                          }}
+                        />
+                        Required
+                      </label>
+                      <button
+                        onClick={() => setMetaFields(metaFields.filter((_, i) => i !== idx))}
+                        className="text-red-400 hover:text-red-600 text-sm px-1"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+
+                  <div className="flex gap-2 flex-wrap">
+                    <button
+                      onClick={() => setMetaFields([...metaFields, { field_name: "", field_label: "", field_type: "text", required: true }])}
+                      className="text-xs px-3 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100"
+                    >
+                      + Add field
+                    </button>
+
+                    {/* Quick-add from existing fields */}
+                    {existingMetaFieldTypes.length > 0 && metaFields.length === 0 && (
+                      <div className="flex gap-1 flex-wrap items-center">
+                        <span className="text-xs text-gray-400">Quick add:</span>
+                        {existingMetaFieldTypes.map((ef) => (
+                          <button
+                            key={`${ef.field_type}-${ef.label}`}
+                            onClick={() => setMetaFields([...metaFields, {
+                              field_name: ef.label.toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/ +/g, "_"),
+                              field_label: ef.label,
+                              field_type: ef.field_type,
+                              required: true,
+                            }])}
+                            className="text-xs px-2 py-0.5 rounded bg-blue-50 text-blue-700 hover:bg-blue-100"
+                          >
+                            {ef.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
