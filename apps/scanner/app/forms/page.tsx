@@ -16,18 +16,30 @@ type Asset = {
   active: boolean;
 };
 
-type FilingRule = { type_code: string; document_type: string };
+type FilingRule = { type_code: string; document_type: string; description: string | null };
 type DocDef = { doc_code: string; doc_name: string; type_code: string; category: string | null; interval_days: number | null; meta_required: boolean };
 
-const FORM_PREFIXES = [
-  { value: "HS", label: "Health & Safety", category: "hs-form" },
-  { value: "DR", label: "Drawing / Design", category: "dr-form" },
-  { value: "CR", label: "Correspondence", category: "cr-form" },
-  { value: "MS", label: "Method Statement", category: "ms-form" },
-  { value: "RP", label: "Report", category: "rp-form" },
-  { value: "SH", label: "Schedule", category: "sh-form" },
-  { value: "SN", label: "Specification", category: "sn-form" },
-  { value: "DB", label: "Database / Register", category: "db-form" },
+const AREAS = [
+  { value: "HS", label: "Health & Safety", hint: "Risk assessments, inspections, RAMS, incident reports" },
+  { value: "DR", label: "Drawing / Design", hint: "Drawing submissions, design reviews" },
+  { value: "CR", label: "Correspondence", hint: "Letters, RFIs, transmittals" },
+  { value: "MS", label: "Method Statement", hint: "Work procedures, method statements" },
+  { value: "RP", label: "Report", hint: "Inspection reports, test reports" },
+  { value: "SH", label: "Schedule", hint: "Delivery schedules, material schedules" },
+  { value: "SN", label: "Specification", hint: "Technical specifications" },
+  { value: "MR", label: "Meeting Record", hint: "Meeting minutes, toolbox talks" },
+  { value: "DB", label: "Database / Register", hint: "Registers, logs, tracking documents" },
+];
+
+const INTERVALS = [
+  { value: "", label: "No — one-off document" },
+  { value: "1", label: "Daily" },
+  { value: "7", label: "Weekly" },
+  { value: "14", label: "Fortnightly" },
+  { value: "30", label: "Monthly" },
+  { value: "91", label: "Quarterly" },
+  { value: "182", label: "6-monthly" },
+  { value: "365", label: "Annually" },
 ];
 
 export default function FormsPage() {
@@ -39,23 +51,14 @@ export default function FormsPage() {
   const [filter, setFilter] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
 
-  // New form state
+  // Creation flow
   const [showForm, setShowForm] = useState(false);
-  const [step, setStep] = useState<"definition" | "asset">("definition");
-
-  // Step 1: Document definition
-  const [useExistingDef, setUseExistingDef] = useState(true);
-  const [selectedDocCode, setSelectedDocCode] = useState("");
-  const [newDocCode, setNewDocCode] = useState("");
-  const [newDocName, setNewDocName] = useState("");
-  const [newDocTypeCode, setNewDocTypeCode] = useState("");
-  const [newDocInterval, setNewDocInterval] = useState("");
-
-  // Step 2: Form asset
-  const [formPrefix, setFormPrefix] = useState("HS");
+  const [typeCode, setTypeCode] = useState("");
+  const [area, setArea] = useState("");
   const [formName, setFormName] = useState("");
-  const [formLocation, setFormLocation] = useState("");
-
+  const [docCode, setDocCode] = useState("");
+  const [interval, setInterval_] = useState("");
+  const [location, setLocation] = useState("");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -88,7 +91,7 @@ export default function FormsPage() {
     fetchDocDefs();
     supabase
       .from("document_filing_rule")
-      .select("type_code, document_type")
+      .select("type_code, document_type, description")
       .eq("active", true)
       .order("type_code")
       .then(({ data }) => setFilingRules(data ?? []));
@@ -103,16 +106,33 @@ export default function FormsPage() {
       return (
         a.asset_code.toLowerCase().includes(q) ||
         a.asset_name.toLowerCase().includes(q) ||
-        (a.location ?? "").toLowerCase().includes(q)
+        (a.location ?? "").toLowerCase().includes(q) ||
+        (a.doc_code ?? "").toLowerCase().includes(q)
       );
     }
     return true;
   });
 
-  // Get the active doc definition (existing or new)
-  const activeDocCode = useExistingDef ? selectedDocCode : newDocCode.toUpperCase().replace(/[^A-Z0-9-]/g, "");
-  const activeDocDef = docDefs.find((d) => d.doc_code === selectedDocCode);
-  const activeTypeCode = useExistingDef ? (activeDocDef?.type_code ?? "") : newDocTypeCode;
+  // Auto-generate doc code from form name
+  const autoDocCode = formName
+    .toUpperCase()
+    .replace(/[^A-Z0-9 ]/g, "")
+    .split(" ")
+    .filter(Boolean)
+    .map((w) => w.substring(0, 3))
+    .join("-")
+    .substring(0, 20);
+
+  const activeDocCode = docCode || autoDocCode;
+
+  // Check for existing similar forms
+  const existingMatch = docDefs.find(
+    (d) => d.doc_code === activeDocCode || d.doc_name.toLowerCase() === formName.toLowerCase()
+  );
+
+  const existingAssetMatch = assets.find(
+    (a) => a.doc_code === activeDocCode
+  );
 
   const getNextSeq = (prefix: string): string => {
     const existing = assets
@@ -126,74 +146,47 @@ export default function FormsPage() {
     return String(max + 1).padStart(3, "0");
   };
 
-  const generatedAssetCode = formPrefix && activeDocCode
-    ? `${formPrefix}-${activeDocCode}-${getNextSeq(`${formPrefix}-${activeDocCode}`)}`
+  const generatedAssetCode = area && activeDocCode
+    ? `${area}-${activeDocCode}-${getNextSeq(`${area}-${activeDocCode}`)}`
     : "";
 
-  const generatedCategory = formPrefix
-    ? `${formPrefix.toLowerCase()}-form`
-    : "";
+  const generatedCategory = area ? `${area.toLowerCase()}-form` : "";
 
-  const qrPreview = activeTypeCode && generatedAssetCode && activeDocCode
-    ? `${activeTypeCode}|${generatedAssetCode}|${activeDocCode}`
+  const qrPreview = typeCode && generatedAssetCode && activeDocCode
+    ? `${typeCode}|${generatedAssetCode}|${activeDocCode}`
     : "";
 
   const resetForm = () => {
-    setStep("definition");
-    setUseExistingDef(true);
-    setSelectedDocCode("");
-    setNewDocCode("");
-    setNewDocName("");
-    setNewDocTypeCode("");
-    setNewDocInterval("");
-    setFormPrefix("HS");
+    setTypeCode("");
+    setArea("");
     setFormName("");
-    setFormLocation("");
+    setDocCode("");
+    setInterval_("");
+    setLocation("");
     setFormError(null);
-  };
-
-  const handleNext = () => {
-    if (useExistingDef && !selectedDocCode) {
-      setFormError("Select a document definition");
-      return;
-    }
-    if (!useExistingDef && (!newDocCode || !newDocName || !newDocTypeCode)) {
-      setFormError("Document code, name, and type code are required");
-      return;
-    }
-    if (!useExistingDef && newDocCode.includes("_")) {
-      setFormError("Underscores are not allowed in document codes");
-      return;
-    }
-    setFormError(null);
-
-    // Pre-fill form name from doc definition
-    if (useExistingDef && activeDocDef && !formName) {
-      setFormName(activeDocDef.doc_name);
-    } else if (!useExistingDef && !formName) {
-      setFormName(newDocName);
-    }
-
-    setStep("asset");
   };
 
   const handleSave = async () => {
     setFormError(null);
-    if (!generatedAssetCode || !formName) {
-      setFormError("All required fields must be completed");
+    if (!typeCode || !area || !formName || !activeDocCode) {
+      setFormError("Please complete all required fields");
+      return;
+    }
+    if (activeDocCode.includes("_")) {
+      setFormError("Underscores are not allowed — reserved as field separators");
       return;
     }
 
     setSaving(true);
 
-    // Create new doc definition if needed
-    if (!useExistingDef) {
+    // Create doc definition if it doesn't exist
+    if (!existingMatch) {
       const { error } = await supabase.from("document_definition").insert({
-        doc_code: newDocCode.toUpperCase(),
-        doc_name: newDocName,
-        type_code: newDocTypeCode,
+        doc_code: activeDocCode,
+        doc_name: formName,
+        type_code: typeCode,
         category: generatedCategory,
-        interval_days: newDocInterval ? parseInt(newDocInterval, 10) : null,
+        interval_days: interval ? parseInt(interval, 10) : null,
       });
       if (error) {
         setFormError(`Definition: ${error.message}`);
@@ -207,7 +200,7 @@ export default function FormsPage() {
       asset_code: generatedAssetCode,
       asset_name: formName,
       category: generatedCategory,
-      location: formLocation || null,
+      location: location || null,
       doc_code: activeDocCode,
     });
 
@@ -351,198 +344,178 @@ export default function FormsPage() {
         </span>
       </div>
 
-      {/* New form wizard */}
+      {/* Guided creation flow */}
       {showForm && (
-        <div className="border rounded-lg p-4 mb-4 bg-gray-50">
-          {step === "definition" ? (
-            <>
-              <h3 className="text-sm font-semibold mb-3" style={{ color: "var(--pss-navy)" }}>
-                Step 1: Document Definition
-              </h3>
+        <div className="border rounded-lg p-5 mb-4 bg-gray-50 space-y-4">
 
-              <div className="flex gap-4 mb-3">
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="radio"
-                    checked={useExistingDef}
-                    onChange={() => setUseExistingDef(true)}
-                  />
-                  Use existing definition
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="radio"
-                    checked={!useExistingDef}
-                    onChange={() => setUseExistingDef(false)}
-                  />
-                  Create new definition
-                </label>
-              </div>
+          {/* Q1: What type of document is this? */}
+          <div>
+            <label className="block text-sm font-semibold text-gray-800 mb-1">
+              What type of document is this?
+            </label>
+            <p className="text-xs text-gray-500 mb-2">e.g. a meeting record, a certificate, an inspection report</p>
+            <select
+              value={typeCode}
+              onChange={(e) => setTypeCode(e.target.value)}
+              className="w-full md:w-1/2 border rounded px-3 py-2 text-sm"
+            >
+              <option value="">Select document type...</option>
+              {filingRules.map((r) => (
+                <option key={r.type_code} value={r.type_code}>
+                  {r.type_code} — {r.document_type}
+                </option>
+              ))}
+            </select>
+          </div>
 
-              {useExistingDef ? (
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Document Definition *</label>
-                  <select
-                    value={selectedDocCode}
-                    onChange={(e) => setSelectedDocCode(e.target.value)}
-                    className="w-full md:w-1/2 border rounded px-2 py-1.5 text-sm"
+          {/* Q2: What area does this fall under? */}
+          {typeCode && (
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1">
+                What area does this fall under?
+              </label>
+              <p className="text-xs text-gray-500 mb-2">This determines how the form is categorised and filed</p>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                {AREAS.map((a) => (
+                  <label
+                    key={a.value}
+                    className={`flex flex-col p-2 rounded border cursor-pointer text-sm ${
+                      area === a.value ? "border-blue-500 bg-blue-50" : "border-gray-200 hover:bg-gray-50"
+                    }`}
                   >
-                    <option value="">Select definition...</option>
-                    {docDefs.map((d) => (
-                      <option key={d.doc_code} value={d.doc_code}>
-                        {d.doc_code} — {d.doc_name} ({d.type_code})
-                      </option>
-                    ))}
-                  </select>
-                  {activeDocDef && (
-                    <p className="text-xs text-gray-500 mt-2">
-                      Type: <strong>{activeDocDef.type_code}</strong> |
-                      Interval: <strong>{activeDocDef.interval_days ? `${activeDocDef.interval_days} days` : "One-off"}</strong> |
-                      Meta required: <strong>{activeDocDef.meta_required ? "Yes" : "No"}</strong>
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Doc Code *</label>
-                    <input
-                      type="text"
-                      value={newDocCode}
-                      onChange={(e) => setNewDocCode(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ""))}
-                      placeholder="e.g. TBT"
-                      className="w-full border rounded px-2 py-1.5 text-sm font-mono uppercase"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Name *</label>
-                    <input
-                      type="text"
-                      value={newDocName}
-                      onChange={(e) => setNewDocName(e.target.value)}
-                      placeholder="e.g. Toolbox Talk"
-                      className="w-full border rounded px-2 py-1.5 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">ISO Type Code *</label>
-                    <select
-                      value={newDocTypeCode}
-                      onChange={(e) => setNewDocTypeCode(e.target.value)}
-                      className="w-full border rounded px-2 py-1.5 text-sm"
-                    >
-                      <option value="">Select...</option>
-                      {filingRules.map((r) => (
-                        <option key={r.type_code} value={r.type_code}>
-                          {r.type_code} — {r.document_type}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Interval (days)</label>
-                    <input
-                      type="number"
-                      value={newDocInterval}
-                      onChange={(e) => setNewDocInterval(e.target.value)}
-                      placeholder="e.g. 7 (blank = one-off)"
-                      className="w-full border rounded px-2 py-1.5 text-sm"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {formError && <p className="text-red-600 text-sm mt-2">{formError}</p>}
-              <div className="mt-3">
-                <button
-                  onClick={handleNext}
-                  className="px-4 py-1.5 text-sm text-white rounded hover:opacity-90"
-                  style={{ backgroundColor: "var(--pss-navy)" }}
-                >
-                  Next
-                </button>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="area"
+                        value={a.value}
+                        checked={area === a.value}
+                        onChange={(e) => setArea(e.target.value)}
+                      />
+                      <span className="font-medium">{a.label}</span>
+                    </div>
+                    <span className="text-xs text-gray-400 ml-5">{a.hint}</span>
+                  </label>
+                ))}
               </div>
-            </>
-          ) : (
-            <>
-              <h3 className="text-sm font-semibold mb-1" style={{ color: "var(--pss-navy)" }}>
-                Step 2: Form Asset
-              </h3>
-              <p className="text-xs text-gray-500 mb-3">
-                Definition: <strong>{activeDocCode}</strong>
-                {activeTypeCode && <> | ISO type: <strong>{activeTypeCode}</strong></>}
+            </div>
+          )}
+
+          {/* Q3: What's it for? */}
+          {typeCode && area && (
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1">
+                What is this form for?
+              </label>
+              <p className="text-xs text-gray-500 mb-2">e.g. Toolbox Talk, Weekly Inspection, Crane Pre-Use Check</p>
+              <input
+                type="text"
+                value={formName}
+                onChange={(e) => setFormName(e.target.value)}
+                placeholder="Enter a description..."
+                className="w-full md:w-1/2 border rounded px-3 py-2 text-sm"
+              />
+            </div>
+          )}
+
+          {/* Auto-generated doc code + override */}
+          {typeCode && area && formName && (
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1">
+                Short code
+              </label>
+              <p className="text-xs text-gray-500 mb-2">
+                Auto-generated from the description — edit if you prefer something different
               </p>
+              <input
+                type="text"
+                value={docCode || autoDocCode}
+                onChange={(e) => setDocCode(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ""))}
+                className="w-48 border rounded px-3 py-2 text-sm font-mono font-bold"
+              />
+            </div>
+          )}
 
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Form Purpose *</label>
-                  <select
-                    value={formPrefix}
-                    onChange={(e) => setFormPrefix(e.target.value)}
-                    className="w-full border rounded px-2 py-1.5 text-sm"
-                  >
-                    {FORM_PREFIXES.map((p) => (
-                      <option key={p.value} value={p.value}>
-                        {p.value} — {p.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Generated Code</label>
-                  <input
-                    type="text"
-                    value={generatedAssetCode}
-                    readOnly
-                    className="w-full border rounded px-2 py-1.5 text-sm bg-white font-mono font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Description *</label>
-                  <input
-                    type="text"
-                    value={formName}
-                    onChange={(e) => setFormName(e.target.value)}
-                    placeholder="e.g. Weekly Toolbox Talk"
-                    className="w-full border rounded px-2 py-1.5 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Location / Site</label>
-                  <input
-                    type="text"
-                    value={formLocation}
-                    onChange={(e) => setFormLocation(e.target.value)}
-                    placeholder="e.g. Carrwood Road"
-                    className="w-full border rounded px-2 py-1.5 text-sm"
-                  />
-                </div>
-              </div>
-
-              {qrPreview && (
-                <p className="text-xs text-gray-500 mt-2">
-                  QR will encode: <span className="font-mono font-bold">{qrPreview}</span>
-                </p>
+          {/* Existing match warning */}
+          {formName && existingMatch && (
+            <div className="bg-amber-50 border border-amber-200 rounded p-3 text-sm">
+              <strong>Similar form already exists:</strong>{" "}
+              <span className="font-mono">{existingMatch.doc_code}</span> — {existingMatch.doc_name}
+              {existingAssetMatch && (
+                <span className="text-gray-500"> (asset: {existingAssetMatch.asset_code})</span>
               )}
+              <p className="text-xs text-amber-600 mt-1">
+                Consider using the existing form rather than creating a duplicate.
+              </p>
+            </div>
+          )}
 
-              {formError && <p className="text-red-600 text-sm mt-2">{formError}</p>}
-              <div className="mt-3 flex gap-2">
-                <button
-                  onClick={() => { setStep("definition"); setFormError(null); }}
-                  className="px-4 py-1.5 text-sm text-gray-600 hover:text-gray-800"
-                >
-                  Back
-                </button>
-                <button
-                  onClick={handleSave}
-                  disabled={saving || !generatedAssetCode || !formName}
-                  className="px-4 py-1.5 text-sm text-white rounded disabled:opacity-50 hover:opacity-90"
-                  style={{ backgroundColor: "var(--pss-navy)" }}
-                >
-                  {saving ? "Saving..." : "Create Form"}
-                </button>
+          {/* Q4: Repeating? */}
+          {typeCode && area && formName && activeDocCode && (
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1">
+                Is this a repeating document?
+              </label>
+              <select
+                value={interval}
+                onChange={(e) => setInterval_(e.target.value)}
+                className="w-full md:w-1/3 border rounded px-3 py-2 text-sm"
+              >
+                {INTERVALS.map((i) => (
+                  <option key={i.value} value={i.value}>{i.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Location */}
+          {typeCode && area && formName && activeDocCode && (
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-1">
+                Location / site <span className="font-normal text-gray-400">(optional)</span>
+              </label>
+              <input
+                type="text"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                placeholder="e.g. Carrwood Road"
+                className="w-full md:w-1/3 border rounded px-3 py-2 text-sm"
+              />
+            </div>
+          )}
+
+          {/* Summary + save */}
+          {typeCode && area && formName && activeDocCode && (
+            <div className="border-t pt-4 mt-2">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs mb-3">
+                <div>
+                  <span className="text-gray-500">Form code</span>
+                  <p className="font-mono font-bold text-sm">{generatedAssetCode}</p>
+                </div>
+                <div>
+                  <span className="text-gray-500">Doc definition</span>
+                  <p className="font-mono font-bold text-sm">{activeDocCode}</p>
+                </div>
+                <div>
+                  <span className="text-gray-500">ISO type</span>
+                  <p className="font-mono font-bold text-sm">{typeCode}</p>
+                </div>
+                <div>
+                  <span className="text-gray-500">QR content</span>
+                  <p className="font-mono text-sm">{qrPreview}</p>
+                </div>
               </div>
-            </>
+
+              {formError && <p className="text-red-600 text-sm mb-2">{formError}</p>}
+
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="px-5 py-2 text-sm text-white rounded disabled:opacity-50 hover:opacity-90"
+                style={{ backgroundColor: "var(--pss-navy)" }}
+              >
+                {saving ? "Creating..." : "Create Form"}
+              </button>
+            </div>
           )}
         </div>
       )}
@@ -559,9 +532,8 @@ export default function FormsPage() {
               <tr className="border-b text-left text-gray-500">
                 <th className="py-2 pr-4 font-medium">Code</th>
                 <th className="py-2 pr-4 font-medium">Description</th>
-                <th className="py-2 pr-4 font-medium">Doc Definition</th>
+                <th className="py-2 pr-4 font-medium">Document</th>
                 <th className="py-2 pr-4 font-medium">ISO Type</th>
-                <th className="py-2 pr-4 font-medium">Category</th>
                 <th className="py-2 pr-4 font-medium">Location</th>
                 <th className="py-2 font-medium w-20"></th>
               </tr>
@@ -587,7 +559,6 @@ export default function FormsPage() {
                       )}
                     </td>
                     <td className="py-2 pr-4 font-mono text-xs font-bold">{linked?.type_code ?? "—"}</td>
-                    <td className="py-2 pr-4 text-gray-600 text-xs">{asset.category}</td>
                     <td className="py-2 pr-4 text-gray-600 text-xs">{asset.location ?? "—"}</td>
                     <td className="py-2 text-right">
                       <button
