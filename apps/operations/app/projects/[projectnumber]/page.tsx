@@ -25,6 +25,7 @@ type Commercial = {
   planned_start_date: string | null;
   planned_completion_date: string | null;
   actual_start_date: string | null;
+  etc_manual: number | null;
   notes: string | null;
 };
 
@@ -95,7 +96,7 @@ export default function ProjectDetailPage() {
       // Commercial data
       const { data: commData } = await supabase
         .from("project_items_commercial")
-        .select("projectnumber, item_seq, pct_complete, planned_start_date, planned_completion_date, actual_start_date, notes")
+        .select("projectnumber, item_seq, pct_complete, planned_start_date, planned_completion_date, actual_start_date, etc_manual, notes")
         .eq("projectnumber", projectnumber);
       if (cancelled) return;
 
@@ -137,6 +138,7 @@ export default function ProjectDetailPage() {
       planned_start_date: existing?.planned_start_date ?? null,
       planned_completion_date: existing?.planned_completion_date ?? null,
       actual_start_date: existing?.actual_start_date ?? null,
+      etc_manual: existing?.etc_manual ?? null,
       notes: existing?.notes ?? null,
       [field]: value,
     };
@@ -151,6 +153,18 @@ export default function ProjectDetailPage() {
       { project_item_id: item.id, ...updated },
       { onConflict: "projectnumber,item_seq" }
     );
+
+    // Log ETC history when etc_manual is updated
+    if (field === "etc_manual" && value != null) {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      await supabase.from("project_etc_history").insert({
+        project_item_id: item.id,
+        projectnumber: item.projectnumber,
+        item_seq: item.item_seq,
+        etc_value: value,
+        entered_by: authUser?.id ?? null,
+      });
+    }
   }, [commercial]);
 
   // Add invoice milestone
@@ -367,7 +381,7 @@ export default function ProjectDetailPage() {
                     {/* Estimates */}
                     <div>
                       <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Estimates & Progress</h3>
-                      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
                         <div>
                           <div className="text-xs text-gray-400 mb-1">Est. Labour</div>
                           <EditCell value={item.est_labour || ""} onSave={(v) => saveEstimate(item.id, "est_labour", parseFloat(v) || 0)} step="0.01" placeholder="set" className="text-right border rounded px-2 py-1 bg-blue-50/30" />
@@ -389,6 +403,13 @@ export default function ProjectDetailPage() {
                           <div className={`text-sm font-medium px-2 py-1 ${estTotal > 0 ? (item.value - estTotal >= 0 ? "text-green-700" : "text-red-600") : ""}`}>
                             {estTotal > 0 ? fmtC(item.value - estTotal) : "–"}
                           </div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-400 mb-1">Est. to Complete (ETC)</div>
+                          <EditCell value={comm?.etc_manual ?? ""} onSave={(v) => saveCommercial(item, "etc_manual", parseFloat(v) || null)} step="0.01" placeholder="set" className="text-right border rounded px-2 py-1" />
+                          {comm?.etc_manual == null && estTotal > 0 && (comm?.pct_complete ?? 0) > 0 && (
+                            <div className="text-xs text-gray-400 mt-1 px-2">Suggested: {fmtC(estTotal - (estTotal * (comm?.pct_complete ?? 0) / 100))}</div>
+                          )}
                         </div>
                       </div>
                     </div>
