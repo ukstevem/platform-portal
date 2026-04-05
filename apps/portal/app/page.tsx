@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useAuth } from "@platform/auth/AuthProvider";
 import { AuthButton } from "@platform/auth/AuthButton";
 
@@ -29,10 +30,24 @@ const apps = [
     href: "/scanner/",
     description: "Scan QR-coded documents and automatically file them by type.",
   },
+  {
+    name: "Laser Quote",
+    href: "/laserquote/",
+    description: "Import laser cutter nesting files, price parts, and generate quotes.",
+  },
 ];
 
 export default function PortalHome() {
   const { user, loading } = useAuth();
+  const [tab, setTab] = useState<"apps" | "kiosk">("apps");
+
+  const kioskScreens = [
+    {
+      name: "Laser Production",
+      href: "/laserquote/production/?kiosk=true",
+      description: "Workshop production queue, completion, and collection tracking.",
+    },
+  ];
 
   if (loading) {
     return (
@@ -65,23 +80,62 @@ export default function PortalHome() {
         <p className="text-gray-500 mt-1">Power System Services Platform</p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {apps.map((app) => (
-          <a
-            key={app.href}
-            href={app.href}
-            className="block border rounded-lg p-5 hover:shadow-md transition-shadow bg-white group"
-          >
-            <h2
-              className="text-lg font-semibold mb-2 group-hover:underline"
-              style={{ color: "var(--pss-navy)" }}
-            >
-              {app.name}
-            </h2>
-            <p className="text-sm text-gray-500">{app.description}</p>
-          </a>
-        ))}
+      <div className="flex gap-4 mb-6 border-b">
+        <button
+          onClick={() => setTab("apps")}
+          className={`pb-2 text-sm font-medium ${tab === "apps" ? "border-b-2 border-current" : "text-gray-400"}`}
+          style={tab === "apps" ? { color: "var(--pss-navy)" } : undefined}
+        >
+          Applications
+        </button>
+        <button
+          onClick={() => setTab("kiosk")}
+          className={`pb-2 text-sm font-medium ${tab === "kiosk" ? "border-b-2 border-current" : "text-gray-400"}`}
+          style={tab === "kiosk" ? { color: "var(--pss-navy)" } : undefined}
+        >
+          Kiosk Views
+        </button>
       </div>
+
+      {tab === "apps" && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {apps.map((app) => (
+            <a
+              key={app.href}
+              href={app.href}
+              className="block border rounded-lg p-5 hover:shadow-md transition-shadow bg-white group"
+            >
+              <h2
+                className="text-lg font-semibold mb-2 group-hover:underline"
+                style={{ color: "var(--pss-navy)" }}
+              >
+                {app.name}
+              </h2>
+              <p className="text-sm text-gray-500">{app.description}</p>
+            </a>
+          ))}
+        </div>
+      )}
+
+      {tab === "kiosk" && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {kioskScreens.map((screen) => (
+            <a
+              key={screen.href}
+              href={screen.href}
+              className="block border rounded-lg p-5 hover:shadow-md transition-shadow bg-white group border-dashed"
+            >
+              <h2
+                className="text-lg font-semibold mb-2 group-hover:underline"
+                style={{ color: "var(--pss-navy)" }}
+              >
+                {screen.name}
+              </h2>
+              <p className="text-sm text-gray-500">{screen.description}</p>
+            </a>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

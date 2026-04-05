@@ -103,6 +103,55 @@ importers:
         specifier: ^5
         version: 5.9.3
 
+  apps/laserquote:
+    dependencies:
+      '@platform/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
+      '@platform/supabase':
+        specifier: workspace:*
+        version: link:../../packages/supabase
+      '@platform/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      '@supabase/supabase-js':
+        specifier: ^2.84.0
+        version: 2.99.1
+      next:
+        specifier: 16.1.0
+        version: 16.1.0(@babel/core@7.29.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      react:
+        specifier: 19.2.3
+        version: 19.2.3
+      react-dom:
+        specifier: 19.2.3
+        version: 19.2.3(react@19.2.3)
+    devDependencies:
+      '@tailwindcss/postcss':
+        specifier: ^4
+        version: 4.2.1
+      '@types/node':
+        specifier: ^20
+        version: 20.19.37
+      '@types/react':
+        specifier: ^19
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: ^19
+        version: 19.2.3(@types/react@19.2.14)
+      eslint:
+        specifier: ^9
+        version: 9.39.4(jiti@2.6.1)
+      eslint-config-next:
+        specifier: 16.1.0
+        version: 16.1.0(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)
+      tailwindcss:
+        specifier: ^4
+        version: 4.2.1
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
   apps/operations:
     dependencies:
       '@platform/auth':

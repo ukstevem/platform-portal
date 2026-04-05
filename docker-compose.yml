@@ -117,6 +117,23 @@ services:
       - scanner_root_nm:/repo/node_modules
       - scanner_node_modules:/repo/apps/scanner/node_modules
 
+  laserquote:
+    build:
+      context: .
+      dockerfile: docker/node/Dockerfile.dev
+    container_name: platform_laserquote
+    working_dir: /repo
+    env_file: .env
+    environment:
+      WATCHPACK_POLLING: "true"
+    command:
+      ["sh", "-lc", "corepack enable && corepack prepare pnpm@9.15.0 --activate && pnpm install && pnpm -C apps/laserquote dev --hostname 0.0.0.0 --port 3006"]
+    volumes:
+      - ./:/repo
+      - laserquote_pnpm_store:/repo/.pnpm-store
+      - laserquote_root_nm:/repo/node_modules
+      - laserquote_node_modules:/repo/apps/laserquote/node_modules
+
 volumes:
   portal_pnpm_store:
   portal_root_nm:
@@ -136,3 +153,6 @@ volumes:
   scanner_pnpm_store:
   scanner_root_nm:
   scanner_node_modules:
+  laserquote_pnpm_store:
+  laserquote_root_nm:
+  laserquote_node_modules:

@@ -27,11 +27,11 @@ docker buildx build \
   docker/nginx/
 
 # Build and push each app
-for APP in portal jobcards documents timesheets scanner; do
+for APP in portal jobcards documents timesheets scanner laserquote; do
   echo ""
   echo "--- $APP ---"
 
-  PORT_MAP=("portal:3000" "jobcards:3001" "documents:3002" "timesheets:3003" "scanner:3005")
+  PORT_MAP=("portal:3000" "jobcards:3001" "documents:3002" "timesheets:3003" "scanner:3005" "laserquote:3006")
   APP_PORT="3000"
   for p in "${PORT_MAP[@]}"; do
     if [[ "$p" == "$APP:"* ]]; then
@@ -49,6 +49,7 @@ for APP in portal jobcards documents timesheets scanner; do
     --build-arg NEXT_PUBLIC_DOC_GATEWAY_BASE_URL="${NEXT_PUBLIC_DOC_GATEWAY_BASE_URL:-}" \
     --build-arg NEXT_PUBLIC_APP_URL="${NEXT_PUBLIC_APP_URL:-}" \
     --build-arg NEXT_PUBLIC_DOC_SERVICE_URL="${NEXT_PUBLIC_DOC_SERVICE_URL:-}" \
+    --build-arg NEXT_PUBLIC_LASER_QUOTE_SERVICE_URL="${NEXT_PUBLIC_LASER_QUOTE_SERVICE_URL:-}" \
     -t "$REGISTRY/$APP:latest" \
     --push \
     .
