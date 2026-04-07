@@ -33,7 +33,7 @@ type Job = {
   programs: Program[];
 };
 
-const LASER_QUOTE_SERVICE_URL = process.env.NEXT_PUBLIC_LASER_QUOTE_SERVICE_URL ?? "";
+const SERVICE_PREFIX = "/laserquote/api/service";
 
 export default function JobsPage() {
   const { user, loading: authLoading } = useAuth();
@@ -125,7 +125,7 @@ export default function JobsPage() {
   const handleNewQuote = async (importId: string) => {
     setRequoting(importId);
     try {
-      const res = await fetch(`${LASER_QUOTE_SERVICE_URL}/api/laser/quotes`, {
+      const res = await fetch(`${SERVICE_PREFIX}/quotes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ importId }),

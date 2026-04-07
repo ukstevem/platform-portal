@@ -35,7 +35,7 @@ type Quote = {
   created_at: string;
 };
 
-const LASER_QUOTE_SERVICE_URL = process.env.NEXT_PUBLIC_LASER_QUOTE_SERVICE_URL ?? "";
+const SERVICE_PREFIX = "/laserquote/api/service";
 
 export default function QuotesPage() {
   const { user, loading: authLoading } = useAuth();
@@ -57,7 +57,7 @@ export default function QuotesPage() {
   const handleRefresh = async (quoteId: number) => {
     setRefreshing(quoteId);
     try {
-      const res = await fetch(`${LASER_QUOTE_SERVICE_URL}/api/laser/quotes/${quoteId}/refresh`, {
+      const res = await fetch(`${SERVICE_PREFIX}/quotes/${quoteId}/refresh`, {
         method: "POST",
       });
       if (!res.ok) {
@@ -158,7 +158,7 @@ export default function QuotesPage() {
                   </td>
                   <td className="py-3 pr-4 whitespace-nowrap space-x-2">
                     <a
-                      href={`${LASER_QUOTE_SERVICE_URL}/api/laser/quotes/${q.id}/pdf`}
+                      href={`${SERVICE_PREFIX}/quotes/${q.id}/pdf`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-xs px-2 py-1 rounded text-white hover:opacity-90"
@@ -167,7 +167,7 @@ export default function QuotesPage() {
                       Quote
                     </a>
                     <a
-                      href={`${LASER_QUOTE_SERVICE_URL}/api/laser/quotes/${q.id}/delivery-note`}
+                      href={`${SERVICE_PREFIX}/quotes/${q.id}/delivery-note`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-100"

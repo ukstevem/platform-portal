@@ -71,7 +71,7 @@ export default function ProductionPage() {
   const fmtDate = (d: string) =>
     new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit" });
 
-  const LASER_QUOTE_SERVICE_URL = process.env.NEXT_PUBLIC_LASER_QUOTE_SERVICE_URL ?? "";
+  const SERVICE_PREFIX = "/laserquote/api/service";
 
   type ActionDef = { label: string; color: string; status: string };
 
@@ -116,7 +116,7 @@ export default function ProductionPage() {
               {showDocs && (
                 <td className="py-3 pr-4 whitespace-nowrap">
                   <a
-                    href={`${LASER_QUOTE_SERVICE_URL}/api/laser/quotes/${q.id}/delivery-note`}
+                    href={`${SERVICE_PREFIX}/quotes/${q.id}/delivery-note`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-100"

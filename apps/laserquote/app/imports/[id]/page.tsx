@@ -92,7 +92,7 @@ export default function ImportDetailPage() {
   const [expandedProgs, setExpandedProgs] = useState<Set<number>>(new Set());
   const [savingRunCount, setSavingRunCount] = useState<number | null>(null);
 
-  const LASER_QUOTE_SERVICE_URL = process.env.NEXT_PUBLIC_LASER_QUOTE_SERVICE_URL ?? "";
+  const SERVICE_PREFIX = "/laserquote/api/service";
 
   const updateRunCount = async (programId: number, runCount: number) => {
     if (runCount < 1) return;
@@ -347,7 +347,7 @@ export default function ImportDetailPage() {
                 <button
                   onClick={async () => {
                     try {
-                      const res = await fetch(`${LASER_QUOTE_SERVICE_URL}/api/laser/quotes/${quote.id}/refresh`, {
+                      const res = await fetch(`${SERVICE_PREFIX}/quotes/${quote.id}/refresh`, {
                         method: "POST",
                       });
                       if (res.ok) {
@@ -371,7 +371,7 @@ export default function ImportDetailPage() {
                 </button>
               )}
               <a
-                href={`${LASER_QUOTE_SERVICE_URL}/api/laser/quotes/${quote.id}/pdf`}
+                href={`${SERVICE_PREFIX}/quotes/${quote.id}/pdf`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-sm px-4 py-1.5 rounded text-white hover:opacity-90 ml-auto"

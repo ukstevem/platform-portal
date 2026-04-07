@@ -44,7 +44,7 @@ type Quote = {
   lines: QuoteLine[];
 };
 
-const LASER_QUOTE_SERVICE_URL = process.env.NEXT_PUBLIC_LASER_QUOTE_SERVICE_URL ?? "";
+const SERVICE_PREFIX = "/laserquote/api/service";
 
 export default function QuoteDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -141,7 +141,7 @@ export default function QuoteDetailPage() {
         </div>
         <div className="flex items-end gap-2">
           <a
-            href={`${LASER_QUOTE_SERVICE_URL}/api/laser/quotes/${quote.id}/pdf`}
+            href={`${SERVICE_PREFIX}/quotes/${quote.id}/pdf`}
             target="_blank"
             rel="noopener noreferrer"
             className="text-sm px-4 py-2 rounded text-white hover:opacity-90"
@@ -150,7 +150,7 @@ export default function QuoteDetailPage() {
             Quote PDF
           </a>
           <a
-            href={`${LASER_QUOTE_SERVICE_URL}/api/laser/quotes/${quote.id}/delivery-note`}
+            href={`${SERVICE_PREFIX}/quotes/${quote.id}/delivery-note`}
             target="_blank"
             rel="noopener noreferrer"
             className="text-sm px-4 py-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-100"
