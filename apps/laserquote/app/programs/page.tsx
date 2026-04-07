@@ -122,17 +122,15 @@ export default function JobsPage() {
     });
   };
 
-  const handleNewQuote = async (importId: string) => {
-    setRequoting(importId);
+  const handleNewQuote = async (job: Job) => {
+    setRequoting(job.id);
     try {
-      const res = await fetch(`${SERVICE_PREFIX}/quotes`, {
+      const res = await fetch(`${SERVICE_PREFIX}/import/${job.id}/requote`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ importId }),
       });
       if (res.ok) {
         await res.json();
-        window.location.href = `/laserquote/imports/${importId}`;
+        window.location.href = `/laserquote/imports/${job.id}`;
       } else {
         alert("Failed to create quote");
       }
@@ -243,7 +241,7 @@ export default function JobsPage() {
                     <td className="py-2 pr-4 text-gray-400 text-xs whitespace-nowrap">{fmtDate(job.created_at)}</td>
                     <td className="py-2 text-right space-x-2">
                       <button
-                        onClick={(e) => { e.stopPropagation(); handleNewQuote(job.id); }}
+                        onClick={(e) => { e.stopPropagation(); handleNewQuote(job); }}
                         disabled={requoting === job.id}
                         className="text-xs px-3 py-1 rounded text-white hover:opacity-90 bg-indigo-600 disabled:opacity-50"
                       >
