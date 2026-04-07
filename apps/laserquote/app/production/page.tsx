@@ -1,10 +1,31 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useAuth } from "@platform/auth/AuthProvider";
 import { AuthButton } from "@platform/auth/AuthButton";
 import { PageHeader } from "@platform/ui";
 import { supabase } from "@platform/supabase/client";
+
+type ProgramRun = {
+  id: number;
+  program_id: number;
+  run_number: number;
+  status: string;
+  material_trace: string | null;
+};
+
+type Program = {
+  id: number;
+  program_name: string;
+  material_code: string | null;
+  thickness: number | null;
+  sheet_count: number;
+  run_count: number;
+  sheet_x: number | null;
+  sheet_y: number | null;
+  runtime_seconds: number | null;
+  utilisation: number | null;
+};
 
 type Quote = {
   id: number;
@@ -16,23 +37,103 @@ type Quote = {
   thickness: number | null;
   status: string;
   total_value: number | null;
+  material_trace: string | null;
   created_at: string;
   updated_at: string;
+  programs: Program[];
+  runs: ProgramRun[];
 };
+
+const SERVICE_PREFIX = "/laserquote/api/service";
 
 export default function ProductionPage() {
   const { user, loading: authLoading } = useAuth();
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [loading, setLoading] = useState(true);
+  const [expandedQuotes, setExpandedQuotes] = useState<Set<number>>(new Set());
 
   const fetchAll = async () => {
     const { data } = await supabase
       .from("laser_quote")
-      .select("*")
+      .select(`
+        *,
+        import:laser_import!import_id(
+          programs:laser_program(
+            id, program_name, material_code, thickness,
+            sheet_count, run_count, sheet_x, sheet_y,
+            runtime_seconds, utilisation
+          )
+        ),
+        runs:laser_program_run(*)
+      `)
       .in("status", ["won", "completed", "ready_for_collection", "error"])
       .order("updated_at", { ascending: true });
-    setQuotes((data as Quote[] | null) ?? []);
+
+    const mapped = ((data as unknown[]) ?? []).map((raw: unknown) => {
+      const q = raw as Quote & { import: { programs: Program[] } | null };
+      return {
+        ...q,
+        programs: q.import?.programs ?? [],
+      };
+    });
+
+    // Ensure runs exist for each quote's programs
+    for (const q of mapped) {
+      await ensureRuns(q.id, q.programs);
+    }
+
+    // Re-fetch runs after ensuring they exist
+    const { data: allRuns } = await supabase
+      .from("laser_program_run")
+      .select("*")
+      .in("quote_id", mapped.map((q) => q.id));
+
+    for (const q of mapped) {
+      q.runs = (allRuns ?? []).filter((r: ProgramRun) => r.quote_id === q.id);
+    }
+
+    setQuotes(mapped);
     setLoading(false);
+  };
+
+  const ensureRuns = async (quoteId: number, programs: Program[]) => {
+    const { data: existing } = await supabase
+      .from("laser_program_run")
+      .select("program_id, run_number")
+      .eq("quote_id", quoteId);
+
+    const existingSet = new Set(
+      (existing ?? []).map((r: { program_id: number; run_number: number }) => `${r.program_id}-${r.run_number}`)
+    );
+
+    const toInsert: { quote_id: number; program_id: number; run_number: number }[] = [];
+    for (const prog of programs) {
+      for (let r = 1; r <= prog.run_count; r++) {
+        if (!existingSet.has(`${prog.id}-${r}`)) {
+          toInsert.push({ quote_id: quoteId, program_id: prog.id, run_number: r });
+        }
+      }
+    }
+
+    if (toInsert.length > 0) {
+      await supabase.from("laser_program_run").insert(toInsert);
+    }
+  };
+
+  const updateRunStatus = async (runId: number, status: string) => {
+    await supabase
+      .from("laser_program_run")
+      .update({
+        status,
+        completed_at: status === "complete" ? new Date().toISOString() : null,
+      })
+      .eq("id", runId);
+    await fetchAll();
+  };
+
+  const updateQuoteStatus = async (id: number, status: string) => {
+    await supabase.from("laser_quote").update({ status, updated_at: new Date().toISOString() }).eq("id", id);
+    await fetchAll();
   };
 
   useEffect(() => {
@@ -40,9 +141,13 @@ export default function ProductionPage() {
     fetchAll();
   }, [user]);
 
-  const updateStatus = async (id: number, status: string) => {
-    await supabase.from("laser_quote").update({ status, updated_at: new Date().toISOString() }).eq("id", id);
-    await fetchAll();
+  const toggleQuote = (id: number) => {
+    setExpandedQuotes((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
 
   if (authLoading) {
@@ -68,81 +173,213 @@ export default function ProductionPage() {
   const errors = quotes.filter((q) => q.status === "error");
 
   const fmt = (v: number | null) => (v != null ? `£${v.toFixed(2)}` : "—");
-  const fmtDate = (d: string) =>
-    new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit" });
 
-  const SERVICE_PREFIX = "/laserquote/api/service";
+  const formatTime = (secs: number | null) => {
+    if (!secs) return "—";
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    const s = secs % 60;
+    if (h > 0) return `${h}h ${m}m ${s}s`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  };
+
+  const RUN_STATUS_COLORS: Record<string, string> = {
+    pending: "bg-yellow-100 text-yellow-800",
+    complete: "bg-green-100 text-green-800",
+    error: "bg-red-100 text-red-800",
+    cancelled: "bg-gray-100 text-gray-500",
+  };
 
   type ActionDef = { label: string; color: string; status: string };
 
-  const QuoteTable = ({
+  const QuoteSection = ({
     items,
-    actions,
+    quoteActions,
     showDocs,
+    showTrace,
   }: {
     items: Quote[];
-    actions?: ActionDef[];
+    quoteActions?: ActionDef[];
     showDocs?: boolean;
+    showTrace?: boolean;
   }) => (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm border-collapse">
-        <thead>
-          <tr className="border-b text-left text-gray-500">
-            <th className="py-2 pr-4 font-medium">Quote #</th>
-            <th className="py-2 pr-4 font-medium">Customer</th>
-            <th className="py-2 pr-4 font-medium">Material</th>
-            <th className="py-2 pr-4 font-medium">Grade</th>
-            <th className="py-2 pr-4 font-medium">Thick.</th>
-            <th className="py-2 pr-4 font-medium text-right">Value</th>
-            <th className="py-2 pr-4 font-medium">Date</th>
-            {showDocs && <th className="py-2 pr-4 font-medium">Docs</th>}
-            {actions && actions.length > 0 && <th className="py-2 font-medium"></th>}
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((q) => (
-            <tr key={q.id} className="border-b last:border-0 hover:bg-gray-50">
-              <td className="py-2 pr-4 font-mono font-bold">
-                <a href={q.import_id ? `/laserquote/imports/${q.import_id}` : `/laserquote/quotes/${q.id}`} className="text-blue-600 hover:underline">
-                  {q.quote_number}
-                </a>
-              </td>
-              <td className="py-2 pr-4 font-medium">{q.customer}</td>
-              <td className="py-2 pr-4 text-xs">{q.material ?? "—"}</td>
-              <td className="py-2 pr-4 text-xs uppercase">{q.grade ?? "—"}</td>
-              <td className="py-2 pr-4 text-xs">{q.thickness ? `${q.thickness}mm` : "—"}</td>
-              <td className="py-2 pr-4 text-right font-mono text-xs">{fmt(q.total_value)}</td>
-              <td className="py-2 pr-4 text-gray-400 text-xs whitespace-nowrap">{fmtDate(q.created_at)}</td>
+    <div className="space-y-2">
+      {items.map((q) => {
+        const runs = q.runs ?? [];
+        const totalRuns = runs.length;
+        const completedRuns = runs.filter((r) => r.status === "complete").length;
+        const allComplete = totalRuns > 0 && completedRuns === totalRuns;
+
+        return (
+          <div key={q.id} className="border border-gray-200 rounded-lg bg-white">
+            {/* Quote header */}
+            <div
+              className="flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-gray-50"
+              onClick={() => toggleQuote(q.id)}
+            >
+              <span className="text-xs text-gray-400">{expandedQuotes.has(q.id) ? "▼" : "▶"}</span>
+              <a
+                href={q.import_id ? `/laserquote/imports/${q.import_id}` : `/laserquote/quotes/${q.id}`}
+                className="font-mono font-bold text-blue-600 hover:underline text-sm"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {q.quote_number}
+              </a>
+              <span className="font-medium text-sm">{q.customer}</span>
+              <span className="text-xs text-gray-500">{q.material ?? ""} {q.grade ?? ""} {q.thickness ? `${q.thickness}mm` : ""}</span>
+              <span className="font-mono text-xs">{fmt(q.total_value)}</span>
+              <span className="text-xs text-gray-400">
+                {completedRuns}/{totalRuns} runs
+              </span>
+
+              {showTrace && (
+                <input
+                  type="text"
+                  defaultValue={q.material_trace ?? ""}
+                  placeholder="Cert/heat no."
+                  onClick={(e) => e.stopPropagation()}
+                  onBlur={async (e) => {
+                    const val = e.target.value.trim();
+                    if (val !== (q.material_trace ?? "")) {
+                      await supabase
+                        .from("laser_quote")
+                        .update({ material_trace: val || null })
+                        .eq("id", q.id);
+                      await fetchAll();
+                    }
+                  }}
+                  className="w-36 border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-sky-500"
+                />
+              )}
+              {!showTrace && q.material_trace && (
+                <span className="text-xs text-gray-400">{q.material_trace}</span>
+              )}
+
               {showDocs && (
-                <td className="py-3 pr-4 whitespace-nowrap">
-                  <a
-                    href={`${SERVICE_PREFIX}/quotes/${q.id}/delivery-note`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-100"
+                <a
+                  href={`${SERVICE_PREFIX}/quotes/${q.id}/delivery-note`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-100"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  Del. Note
+                </a>
+              )}
+
+              <div className="ml-auto whitespace-nowrap space-x-2">
+                {quoteActions?.map((a) => (
+                  <button
+                    key={a.status}
+                    onClick={(e) => { e.stopPropagation(); updateQuoteStatus(q.id, a.status); }}
+                    className={`text-xs px-3 py-1 rounded text-white hover:opacity-90 ${a.status === "completed" && !allComplete ? "opacity-40 cursor-not-allowed" : ""}`}
+                    disabled={a.status === "completed" && !allComplete}
+                    style={{ backgroundColor: a.color }}
+                    title={a.status === "completed" && !allComplete ? "Complete all program runs first" : ""}
                   >
-                    Del. Note
-                  </a>
-                </td>
-              )}
-              {actions && actions.length > 0 && (
-                <td className="py-3 text-right whitespace-nowrap space-x-2">
-                  {actions.map((a) => (
-                    <button
-                      key={a.status}
-                      onClick={() => updateStatus(q.id, a.status)}
-                      className="text-xs px-3 py-1 rounded text-white hover:opacity-90"
-                      style={{ backgroundColor: a.color }}
-                    >
-                      {a.label}
-                    </button>
-                  ))}
-                </td>
-              )}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+                    {a.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Expanded: program runs */}
+            {expandedQuotes.has(q.id) && q.programs?.length > 0 && (
+              <div className="border-t border-gray-200 px-4 py-3 bg-gray-50">
+                <table className="w-full text-xs border-collapse">
+                  <thead>
+                    <tr className="text-left text-gray-400">
+                      <th className="py-1 pr-3">Program</th>
+                      <th className="py-1 pr-3 text-center">Run</th>
+                      <th className="py-1 pr-3">Sheet Size</th>
+                      <th className="py-1 pr-3 text-center">Sheets</th>
+                      <th className="py-1 pr-3">Runtime</th>
+                      <th className="py-1 pr-3">Status</th>
+                      <th className="py-1 pr-3">Trace</th>
+                      <th className="py-1"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {q.programs.flatMap((prog) => {
+                      const progRuns = runs
+                        .filter((r) => r.program_id === prog.id)
+                        .sort((a, b) => a.run_number - b.run_number);
+
+                      return progRuns.map((run, idx) => (
+                        <tr key={run.id} className={`border-t border-gray-200 ${run.status === "complete" ? "bg-green-50/50" : run.status === "error" ? "bg-red-50/50" : ""}`}>
+                          <td className="py-1.5 pr-3 font-mono font-bold">
+                            {idx === 0 ? prog.program_name : ""}
+                          </td>
+                          <td className="py-1.5 pr-3 text-center font-medium">
+                            {run.run_number} / {prog.run_count}
+                          </td>
+                          <td className="py-1.5 pr-3">
+                            {prog.sheet_x && prog.sheet_y ? `${prog.sheet_x} x ${prog.sheet_y}` : "—"}
+                          </td>
+                          <td className="py-1.5 pr-3 text-center">{prog.sheet_count}</td>
+                          <td className="py-1.5 pr-3">{formatTime(prog.runtime_seconds)}</td>
+                          <td className="py-1.5 pr-3">
+                            <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${RUN_STATUS_COLORS[run.status] ?? "bg-gray-100 text-gray-700"}`}>
+                              {run.status}
+                            </span>
+                          </td>
+                          <td className="py-1.5 pr-3">
+                            <input
+                              type="text"
+                              defaultValue={run.material_trace ?? ""}
+                              placeholder="Cert/heat"
+                              onBlur={async (e) => {
+                                const val = e.target.value.trim();
+                                if (val !== (run.material_trace ?? "")) {
+                                  await supabase
+                                    .from("laser_program_run")
+                                    .update({ material_trace: val || null })
+                                    .eq("id", run.id);
+                                }
+                              }}
+                              className="w-28 border border-gray-300 rounded px-1.5 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-sky-500"
+                            />
+                          </td>
+                          <td className="py-1.5 text-right whitespace-nowrap space-x-1">
+                            {run.status === "pending" && (
+                              <>
+                                <button
+                                  onClick={() => updateRunStatus(run.id, "complete")}
+                                  className="text-xs px-2 py-0.5 rounded text-white hover:opacity-90"
+                                  style={{ backgroundColor: "#16a34a" }}
+                                >
+                                  Complete
+                                </button>
+                                <button
+                                  onClick={() => updateRunStatus(run.id, "error")}
+                                  className="text-xs px-2 py-0.5 rounded text-white hover:opacity-90"
+                                  style={{ backgroundColor: "#dc2626" }}
+                                >
+                                  Error
+                                </button>
+                              </>
+                            )}
+                            {run.status === "error" && (
+                              <button
+                                onClick={() => updateRunStatus(run.id, "pending")}
+                                className="text-xs px-2 py-0.5 rounded text-white hover:opacity-90"
+                                style={{ backgroundColor: "#4f46e5" }}
+                              >
+                                Retry
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ));
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 
@@ -163,9 +400,10 @@ export default function ProductionPage() {
             {queue.length === 0 ? (
               <p className="text-gray-500 text-sm">No jobs in the queue.</p>
             ) : (
-              <QuoteTable
+              <QuoteSection
                 items={queue}
-                actions={[
+                showTrace
+                quoteActions={[
                   { label: "Complete", color: "#16a34a", status: "completed" },
                   { label: "Error", color: "#dc2626", status: "error" },
                   { label: "Cancel", color: "#6b7280", status: "cancelled" },
@@ -183,10 +421,11 @@ export default function ProductionPage() {
             {completed.length === 0 ? (
               <p className="text-gray-500 text-sm">No completed jobs.</p>
             ) : (
-              <QuoteTable
+              <QuoteSection
                 items={completed}
+                showTrace
                 showDocs
-                actions={[
+                quoteActions={[
                   { label: "Ready for Collection", color: "#059669", status: "ready_for_collection" },
                 ]}
               />
@@ -202,10 +441,11 @@ export default function ProductionPage() {
             {ready.length === 0 ? (
               <p className="text-gray-500 text-sm">No jobs ready for collection.</p>
             ) : (
-              <QuoteTable
+              <QuoteSection
                 items={ready}
+                showTrace
                 showDocs
-                actions={[
+                quoteActions={[
                   { label: "Collected", color: "#0d9488", status: "delivered" },
                 ]}
               />
@@ -219,9 +459,9 @@ export default function ProductionPage() {
                 Errors
                 <span className="text-sm font-normal text-gray-400 ml-2">({errors.length})</span>
               </h2>
-              <QuoteTable
+              <QuoteSection
                 items={errors}
-                actions={[
+                quoteActions={[
                   { label: "Return to Queue", color: "#4f46e5", status: "won" },
                   { label: "Cancel", color: "#6b7280", status: "cancelled" },
                 ]}
