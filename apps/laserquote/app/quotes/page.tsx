@@ -7,7 +7,7 @@ import { PageHeader } from "@platform/ui";
 import { supabase } from "@platform/supabase/client";
 import { StatusBadge } from "@/components/StatusBadge";
 
-const ACTIVE_STATUSES = ["draft", "issued", "revised", "error", "cancelled"];
+const ACTIVE_STATUSES = ["draft", "issued", "revised", "error"];
 
 const fetchQuotes = async () => {
   const { data } = await supabase
@@ -125,11 +125,9 @@ export default function QuotesPage() {
                 <th className="py-2 pr-4 font-medium">Material</th>
                 <th className="py-2 pr-4 font-medium">Grade</th>
                 <th className="py-2 pr-4 font-medium">Thick.</th>
-                <th className="py-2 pr-4 font-medium">Terms</th>
-                <th className="py-2 pr-4 font-medium">Lead Time</th>
                 <th className="py-2 pr-4 font-medium text-right">Value</th>
-                <th className="py-2 pr-4 font-medium">Docs</th>
                 <th className="py-2 pr-4 font-medium">Date</th>
+                <th className="py-2 pr-4 font-medium">Docs</th>
                 <th className="py-2 font-medium"></th>
               </tr>
             </thead>
@@ -151,10 +149,15 @@ export default function QuotesPage() {
                   <td className="py-2 pr-4 text-xs">{q.material ?? "—"}</td>
                   <td className="py-2 pr-4 text-xs uppercase">{q.grade ?? "—"}</td>
                   <td className="py-2 pr-4 text-xs">{q.thickness ? `${q.thickness}mm` : "—"}</td>
-                  <td className="py-2 pr-4 text-xs">{q.incoterms ?? "—"}</td>
-                  <td className="py-2 pr-4 text-xs">{q.lead_time ?? "—"}</td>
                   <td className="py-2 pr-4 text-right font-mono text-xs">
                     {q.total_value != null ? `£${q.total_value.toFixed(2)}` : "—"}
+                  </td>
+                  <td className="py-2 pr-4 text-gray-400 text-xs whitespace-nowrap">
+                    {new Date(q.created_at).toLocaleDateString("en-GB", {
+                      day: "2-digit",
+                      month: "short",
+                      year: "2-digit",
+                    })}
                   </td>
                   <td className="py-3 pr-4 whitespace-nowrap space-x-2">
                     <a
@@ -175,13 +178,6 @@ export default function QuotesPage() {
                       Del. Note
                     </a>
                   </td>
-                  <td className="py-2 pr-4 text-gray-400 text-xs whitespace-nowrap">
-                    {new Date(q.created_at).toLocaleDateString("en-GB", {
-                      day: "2-digit",
-                      month: "short",
-                      year: "2-digit",
-                    })}
-                  </td>
                   <td className="py-3 text-right whitespace-nowrap space-x-2">
                     {q.status === "draft" && (
                       <button
@@ -192,15 +188,15 @@ export default function QuotesPage() {
                         {refreshing === q.id ? "..." : "Refresh"}
                       </button>
                     )}
-                    {(q.status === "draft" || q.status === "error" || q.status === "cancelled") && (
+                    {(q.status === "draft" || q.status === "error") && (
                       <button
                         onClick={() => updateStatus(q.id, "won")}
                         className="text-xs px-3 py-1 rounded text-white hover:opacity-90 bg-indigo-600"
                       >
-                        Add to Production
+                        Production
                       </button>
                     )}
-                    {(q.status === "draft" || q.status === "issued" || q.status === "error" || q.status === "cancelled") && (
+                    {(q.status === "draft" || q.status === "issued" || q.status === "error") && (
                       <button
                         onClick={() => updateStatus(q.id, "lost")}
                         className="text-xs px-3 py-1 rounded border border-orange-300 text-orange-700 hover:bg-orange-50"

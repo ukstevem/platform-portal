@@ -23,7 +23,7 @@ type Quote = {
   updated_at: string;
 };
 
-const HISTORY_STATUSES = ["delivered", "lost"];
+const HISTORY_STATUSES = ["delivered", "lost", "cancelled"];
 const SERVICE_PREFIX = "/laserquote/api/service";
 
 export default function HistoryPage() {
@@ -97,6 +97,7 @@ export default function HistoryPage() {
           <option value="">All outcomes</option>
           <option value="delivered">Delivered</option>
           <option value="lost">Lost</option>
+          <option value="cancelled">Cancelled</option>
         </select>
         <span className="text-sm text-gray-400">{filtered.length} records</span>
       </div>

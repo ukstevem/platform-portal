@@ -25,6 +25,7 @@ export async function POST(req: NextRequest) {
   const incoterms = form.get("incoterms") as string;
   const leadTime = form.get("leadTime") as string;
   const premium = form.get("premium") === "true";
+  const freeIssue = form.get("freeIssue") === "true";
   const remCharge = form.get("remCharge") === "true";
 
   if (!customer || !material || !grade) {
@@ -51,6 +52,7 @@ export async function POST(req: NextRequest) {
     sheet_price: sheetPrice ? parseFloat(sheetPrice) : null,
     material_rate: materialRate ? parseFloat(materialRate) : null,
     premium,
+    free_issue: freeIssue,
     rem_charge: remCharge,
   });
 

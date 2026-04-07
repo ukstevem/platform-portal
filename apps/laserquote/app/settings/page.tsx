@@ -89,7 +89,7 @@ export default function SettingsPage() {
     },
     {
       heading: "Margins",
-      keys: ["margin_standard", "margin_premium", "margin_pss"],
+      keys: ["margin_standard", "margin_premium", "margin_pss", "margin_free_issue"],
     },
   ];
 

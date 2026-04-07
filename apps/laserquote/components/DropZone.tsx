@@ -13,6 +13,7 @@ type DropZoneProps = {
   incoterms: string;
   leadTime: string;
   premium: boolean;
+  freeIssue: boolean;
   remCharge: boolean;
   onUploaded?: () => void;
 };
@@ -26,6 +27,7 @@ export function DropZone({
   incoterms,
   leadTime,
   premium,
+  freeIssue,
   remCharge,
   onUploaded,
 }: DropZoneProps) {
@@ -54,6 +56,7 @@ export function DropZone({
       form.append("incoterms", incoterms);
       form.append("leadTime", leadTime);
       form.append("premium", String(premium));
+      form.append("freeIssue", String(freeIssue));
       form.append("remCharge", String(remCharge));
 
       try {
@@ -79,7 +82,7 @@ export function DropZone({
 
       setUploading(false);
     },
-    [customer, material, grade, sheetPrice, materialRate, incoterms, leadTime, premium, remCharge, valid, onUploaded]
+    [customer, material, grade, sheetPrice, materialRate, incoterms, leadTime, premium, freeIssue, remCharge, valid, onUploaded]
   );
 
   const onDrop = useCallback(

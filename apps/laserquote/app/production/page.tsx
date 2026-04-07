@@ -233,28 +233,6 @@ export default function ProductionPage() {
                 {completedRuns}/{totalRuns} runs
               </span>
 
-              {showTrace && (
-                <input
-                  type="text"
-                  defaultValue={q.material_trace ?? ""}
-                  placeholder="Cert/heat no."
-                  onClick={(e) => e.stopPropagation()}
-                  onBlur={async (e) => {
-                    const val = e.target.value.trim();
-                    if (val !== (q.material_trace ?? "")) {
-                      await supabase
-                        .from("laser_quote")
-                        .update({ material_trace: val || null })
-                        .eq("id", q.id);
-                      await fetchAll();
-                    }
-                  }}
-                  className="w-36 border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-sky-500"
-                />
-              )}
-              {!showTrace && q.material_trace && (
-                <span className="text-xs text-gray-400">{q.material_trace}</span>
-              )}
 
               {showDocs && (
                 <a

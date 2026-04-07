@@ -7,6 +7,21 @@ type ImportFormProps = {
   onUploaded?: () => void;
 };
 
+const GRADE_OPTIONS: Record<string, { value: string; label: string }[]> = {
+  MILD: [
+    { value: "S275", label: "S275" },
+    { value: "S355", label: "S355" },
+  ],
+  STAINLESS: [
+    { value: "304", label: "304" },
+    { value: "316", label: "316" },
+  ],
+  AL: [
+    { value: "5083", label: "5083" },
+    { value: "6082", label: "6082" },
+  ],
+};
+
 export function ImportForm({ onUploaded }: ImportFormProps) {
   const [customer, setCustomer] = useState("");
   const [material, setMaterial] = useState("");
@@ -18,6 +33,9 @@ export function ImportForm({ onUploaded }: ImportFormProps) {
   const [leadTime, setLeadTime] = useState("");
   const [premium, setPremium] = useState(false);
   const [remCharge, setRemCharge] = useState(false);
+  const [freeIssue, setFreeIssue] = useState(false);
+
+  const grades = material ? GRADE_OPTIONS[material] ?? [] : [];
 
   return (
     <div className="space-y-6">
@@ -39,31 +57,6 @@ export function ImportForm({ onUploaded }: ImportFormProps) {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Material</label>
-            <select
-              value={material}
-              onChange={(e) => setMaterial(e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
-            >
-              <option value="">Select...</option>
-              <option value="MILD">Mild Steel</option>
-              <option value="STAINLESS">Stainless Steel</option>
-              <option value="AL">Aluminium</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Grade</label>
-            <input
-              type="text"
-              value={grade}
-              onChange={(e) => setGrade(e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
-              placeholder="e.g. S275, 304, 316"
-            />
-          </div>
-
-          <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Incoterms</label>
             <select
               value={incoterms}
@@ -81,6 +74,38 @@ export function ImportForm({ onUploaded }: ImportFormProps) {
           </div>
 
           <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Material</label>
+            <select
+              value={material}
+              onChange={(e) => {
+                setMaterial(e.target.value);
+                setGrade("");
+              }}
+              className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+            >
+              <option value="">Select...</option>
+              <option value="MILD">Mild Steel</option>
+              <option value="STAINLESS">Stainless Steel</option>
+              <option value="AL">Aluminium</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Grade</label>
+            <select
+              value={grade}
+              onChange={(e) => setGrade(e.target.value)}
+              disabled={!material}
+              className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 disabled:bg-gray-100 disabled:text-gray-400"
+            >
+              <option value="">{material ? "Select grade..." : "Select material first"}</option>
+              {grades.map((g) => (
+                <option key={g.value} value={g.value}>{g.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Lead Time</label>
             <input
               type="text"
@@ -90,12 +115,31 @@ export function ImportForm({ onUploaded }: ImportFormProps) {
               placeholder="e.g. 2-3 weeks"
             />
           </div>
+        </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              {useRate ? "Material Rate (£/tonne)" : "Sheet Price (£)"}
-            </label>
-            <div className="flex gap-2">
+        {/* Material Pricing */}
+        {!freeIssue && (
+          <div className="border border-gray-200 rounded-lg p-4 space-y-3 bg-gray-50">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-medium text-gray-700">Material Pricing</h3>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={useRate}
+                  onChange={(e) => {
+                    setUseRate(e.target.checked);
+                    if (e.target.checked) setSheetPrice("");
+                    else setMaterialRate("");
+                  }}
+                  className="rounded"
+                />
+                Calculate from rate
+              </label>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">
+                {useRate ? "Material Rate (£/tonne)" : "Sheet Price (£)"}
+              </label>
               <input
                 type="number"
                 value={useRate ? materialRate : sheetPrice}
@@ -104,28 +148,21 @@ export function ImportForm({ onUploaded }: ImportFormProps) {
                     ? setMaterialRate(e.target.value)
                     : setSheetPrice(e.target.value)
                 }
-                className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
-                placeholder={useRate ? "£/tonne" : "Sheet cost"}
+                className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 bg-white"
+                placeholder={useRate ? "£/tonne override" : "Sheet cost override"}
                 min="0"
               />
+              <p className="text-xs text-gray-400 mt-1">
+                {useRate
+                  ? "Override the stored rate for this job"
+                  : "Enter the actual sheet cost for this job"}
+              </p>
             </div>
           </div>
-        </div>
+        )}
 
-        <div className="flex gap-6 pt-2">
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={useRate}
-              onChange={(e) => {
-                setUseRate(e.target.checked);
-                if (e.target.checked) setSheetPrice("");
-                else setMaterialRate("");
-              }}
-              className="rounded"
-            />
-            Calculate from rate
-          </label>
+        {/* Options */}
+        <div className="flex gap-6 pt-1">
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
@@ -134,6 +171,22 @@ export function ImportForm({ onUploaded }: ImportFormProps) {
               className="rounded"
             />
             Premium
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={freeIssue}
+              onChange={(e) => {
+                setFreeIssue(e.target.checked);
+                if (e.target.checked) {
+                  setSheetPrice("");
+                  setMaterialRate("");
+                  setUseRate(false);
+                }
+              }}
+              className="rounded"
+            />
+            Free Issue
           </label>
           <label className="flex items-center gap-2 text-sm">
             <input
@@ -156,6 +209,7 @@ export function ImportForm({ onUploaded }: ImportFormProps) {
         incoterms={incoterms}
         leadTime={leadTime}
         premium={premium}
+        freeIssue={freeIssue}
         remCharge={remCharge}
         onUploaded={onUploaded}
       />
