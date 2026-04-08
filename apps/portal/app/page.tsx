@@ -35,6 +35,11 @@ const apps = [
     href: "/laserquote/",
     description: "Import laser cutter nesting files, price parts, and generate quotes.",
   },
+  {
+    name: "Assembly Viewer",
+    href: "/assembly/",
+    description: "View 3D assembly models with interactive tree navigation and STL preview.",
+  },
 ];
 
 export default function PortalHome() {

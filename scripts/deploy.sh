@@ -27,11 +27,11 @@ docker buildx build \
   docker/nginx/
 
 # Build and push each app
-for APP in portal jobcards documents timesheets scanner laserquote; do
+for APP in portal jobcards documents timesheets scanner laserquote assembly-viewer; do
   echo ""
   echo "--- $APP ---"
 
-  PORT_MAP=("portal:3000" "jobcards:3001" "documents:3002" "timesheets:3003" "scanner:3005" "laserquote:3006")
+  PORT_MAP=("portal:3000" "jobcards:3001" "documents:3002" "timesheets:3003" "scanner:3005" "laserquote:3006" "assembly-viewer:3007")
   APP_PORT="3000"
   for p in "${PORT_MAP[@]}"; do
     if [[ "$p" == "$APP:"* ]]; then

@@ -74,3 +74,12 @@ services:
       - PORT=3006
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SECRET_KEY}
       - LASER_QUOTE_SERVICE_URL=${LASER_QUOTE_SERVICE_URL:-http://10.0.0.x:8090}
+
+  assembly-viewer:
+    image: ghcr.io/ukstevem/platform-portal/assembly-viewer:latest
+    container_name: platform_assembly_viewer
+    restart: unless-stopped
+    environment:
+      - APP_NAME=assembly-viewer
+      - PORT=3007
+      - DOC_SERVICE_URL=${DOC_SERVICE_URL:-http://10.0.0.75:80}

@@ -134,6 +134,24 @@ services:
       - laserquote_root_nm:/repo/node_modules
       - laserquote_node_modules:/repo/apps/laserquote/node_modules
 
+  assembly-viewer:
+    build:
+      context: .
+      dockerfile: docker/node/Dockerfile.dev
+    container_name: platform_assembly_viewer
+    working_dir: /repo
+    env_file: .env
+    environment:
+      WATCHPACK_POLLING: "true"
+      DOC_SERVICE_URL: ${DOC_SERVICE_URL:-http://10.0.0.75:80}
+    command:
+      ["sh", "-lc", "corepack enable && corepack prepare pnpm@9.15.0 --activate && pnpm install && pnpm -C apps/assembly-viewer dev --hostname 0.0.0.0 --port 3007"]
+    volumes:
+      - ./:/repo
+      - assembly_viewer_pnpm_store:/repo/.pnpm-store
+      - assembly_viewer_root_nm:/repo/node_modules
+      - assembly_viewer_node_modules:/repo/apps/assembly-viewer/node_modules
+
 volumes:
   portal_pnpm_store:
   portal_root_nm:
@@ -156,3 +174,6 @@ volumes:
   laserquote_pnpm_store:
   laserquote_root_nm:
   laserquote_node_modules:
+  assembly_viewer_pnpm_store:
+  assembly_viewer_root_nm:
+  assembly_viewer_node_modules:

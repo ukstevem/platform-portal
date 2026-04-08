@@ -135,3 +135,20 @@ services:
       - PORT=3006
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SECRET_KEY}
       - LASER_QUOTE_SERVICE_URL=${LASER_QUOTE_SERVICE_URL:-http://10.0.0.x:8090}
+
+  assembly-viewer:
+    build:
+      context: .
+      dockerfile: docker/node/Dockerfile.prod
+      args:
+        APP_NAME: assembly-viewer
+        APP_PORT: "3007"
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+    container_name: platform_assembly_viewer
+    restart: unless-stopped
+    environment:
+      - APP_NAME=assembly-viewer
+      - PORT=3007
+      - DOC_SERVICE_URL=${DOC_SERVICE_URL:-http://10.0.0.75:80}
