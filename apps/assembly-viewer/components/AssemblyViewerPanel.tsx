@@ -20,22 +20,24 @@ interface AssemblyData {
   stl_map: Record<string, string>;
 }
 
-/** Walk the tree and collect direct children that have STL files */
-function findChildrenWithStl(
-  nodes: TreeNode[],
-  parentId: string,
+/**
+ * Collect all descendant nodes that have STL files under a given node.
+ * Walks depth-first: if a child has an STL, include it; if it's an assembly
+ * without an STL, recurse into its children.
+ */
+function collectStlDescendants(
+  node: TreeNode,
   stlMap: Record<string, string>
 ): TreeNode[] {
-  for (const node of nodes) {
-    if (node.id === parentId) {
-      return (node.children || []).filter((c) => stlMap[c.id]);
-    }
-    if (node.children) {
-      const found = findChildrenWithStl(node.children, parentId, stlMap);
-      if (found.length > 0) return found;
+  const result: TreeNode[] = [];
+  for (const child of node.children || []) {
+    if (stlMap[child.id]) {
+      result.push(child);
+    } else if (child.children && child.children.length > 0) {
+      result.push(...collectStlDescendants(child, stlMap));
     }
   }
-  return [];
+  return result;
 }
 
 /** Find a node by ID in the tree */
@@ -88,14 +90,18 @@ export function AssemblyViewerPanel() {
 
       // For assemblies or multi-solid parts, load children as a scene
       if (isAssembly || isMultiSolid) {
-        const children = (node.children || []).filter((c) => data.stl_map[c.id]);
+        const children = collectStlDescendants(node, data.stl_map);
         if (children.length > 0) {
-          setViewerStatus(`Loading ${children.length} parts...`);
+          // Cap at 200 parts to avoid browser overload
+          const MAX_PARTS = 200;
+          const loadList = children.length > MAX_PARTS ? children.slice(0, MAX_PARTS) : children;
+          const truncated = children.length > MAX_PARTS;
+
+          setViewerStatus(`Loading ${loadList.length}${truncated ? ` of ${children.length}` : ""} parts...`);
           const newMeshMap = new Map<string, number>();
-          const items: SceneItem[] = children.map((child, i) => {
+          const items: SceneItem[] = loadList.map((child, i) => {
             newMeshMap.set(child.id, i);
             const stlPath = data.stl_map[child.id];
-            // Rewrite /outputs/stl/runId/file.stl -> /assembly/api/stl/runId/file.stl
             const url = stlPath.replace(
               /^\/outputs\/stl\//,
               "/assembly/api/stl/"
@@ -114,7 +120,9 @@ export function AssemblyViewerPanel() {
 
           try {
             await viewerRef.current.loadScene(items);
-            setViewerStatus(`${node.name} — ${children.length} parts loaded`);
+            setViewerStatus(
+              `${node.name} — ${loadList.length} parts loaded${truncated ? ` (${children.length} total, showing first ${MAX_PARTS})` : ""}`
+            );
           } catch {
             setViewerStatus("Failed to load some parts");
           }
@@ -141,6 +149,42 @@ export function AssemblyViewerPanel() {
       }
     },
     [data]
+  );
+
+  const handleMeshClick = useCallback(
+    (meshIndex: number) => {
+      if (!viewerRef.current) return;
+      const meshMap = meshMapRef.current;
+
+      // Reverse lookup: mesh index → node ID
+      let clickedNodeId: string | null = null;
+      for (const [nid, idx] of meshMap) {
+        if (idx === meshIndex) {
+          clickedNodeId = nid;
+          break;
+        }
+      }
+      if (!clickedNodeId) return;
+
+      // Highlight the clicked mesh, dim others
+      for (const [nid, idx] of meshMap) {
+        if (nid === clickedNodeId) {
+          viewerRef.current.setMeshColor(idx, HIGHLIGHT_COLOR, 1.0);
+        } else {
+          viewerRef.current.setMeshColor(idx, DIM_COLOR, DIM_OPACITY);
+        }
+      }
+
+      // Scroll the tree node into view
+      setSelectedNodeId(clickedNodeId);
+      requestAnimationFrame(() => {
+        const el = document.querySelector(`[data-node-id="${clickedNodeId}"]`);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      });
+    },
+    []
   );
 
   const handleHover = useCallback(
@@ -214,7 +258,7 @@ export function AssemblyViewerPanel() {
           <span className="text-sm font-medium text-gray-700">{viewerStatus}</span>
         </div>
         <div className="flex-1 relative">
-          <STLViewerComponent ref={viewerRef} className="absolute inset-0" />
+          <STLViewerComponent ref={viewerRef} className="absolute inset-0" onMeshClick={handleMeshClick} />
         </div>
       </div>
     </div>

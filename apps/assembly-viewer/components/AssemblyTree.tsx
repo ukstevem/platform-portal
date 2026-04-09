@@ -60,12 +60,16 @@ const TreeNodeRow = memo(function TreeNodeRow({
   const [expanded, setExpanded] = useState(depth < 1);
   const hasChildren = node.children && node.children.length > 0;
   const hasStl = stlMap[node.id] !== undefined;
+  // Assemblies are clickable if they have children with STLs, even without their own STL
+  const isClickable =
+    hasStl ||
+    (hasChildren && node.children!.some((c) => stlMap[c.id] !== undefined));
   const isSelected = selectedNodeId === node.id;
   const isHoverable = sceneMeshIds?.has(node.id);
 
   const handleClick = useCallback(() => {
-    if (hasStl) onSelect(node.id);
-  }, [hasStl, node.id, onSelect]);
+    if (isClickable) onSelect(node.id);
+  }, [isClickable, node.id, onSelect]);
 
   const handleMouseEnter = useCallback(() => {
     if (isHoverable) onHover(node.id);
@@ -76,12 +80,12 @@ const TreeNodeRow = memo(function TreeNodeRow({
   }, [isHoverable, onHover]);
 
   return (
-    <li className="select-none">
+    <li className="select-none" data-node-id={node.id}>
       <div
         className={[
           "flex items-center gap-1.5 py-0.5 px-1 rounded text-sm cursor-default group",
           "hover:bg-slate-100",
-          hasStl ? "cursor-pointer" : "",
+          isClickable ? "cursor-pointer" : "",
           isSelected ? "bg-blue-50 ring-1 ring-blue-300" : "",
         ].join(" ")}
         style={{ paddingLeft: depth * 16 + 4 }}
@@ -108,7 +112,7 @@ const TreeNodeRow = memo(function TreeNodeRow({
         <span
           className={[
             "truncate",
-            hasStl ? "font-medium text-gray-900" : "text-gray-500",
+            isClickable ? "font-medium text-gray-900" : "text-gray-500",
           ].join(" ")}
           title={node.name}
         >

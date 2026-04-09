@@ -19,14 +19,22 @@ export interface STLViewerHandle {
   dispose: () => void;
 }
 
+interface STLViewerProps {
+  className?: string;
+  /** Called when a mesh is clicked in the 3D view — returns the mesh index */
+  onMeshClick?: (meshIndex: number) => void;
+}
+
 const DEFAULT_COLOR = 0x4a90d9;
 const HIGHLIGHT_COLOR = 0x4a90d9;
 const DIM_COLOR = 0x888888;
 const DIM_OPACITY = 0.18;
 
-export const STLViewerComponent = forwardRef<STLViewerHandle, { className?: string }>(
-  function STLViewerComponent({ className }, ref) {
+export const STLViewerComponent = forwardRef<STLViewerHandle, STLViewerProps>(
+  function STLViewerComponent({ className, onMeshClick }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
+    const onMeshClickRef = useRef(onMeshClick);
+    onMeshClickRef.current = onMeshClick;
     const stateRef = useRef<{
       scene: THREE.Scene;
       camera: THREE.PerspectiveCamera;
@@ -78,6 +86,43 @@ export const STLViewerComponent = forwardRef<STLViewerHandle, { className?: stri
       back.position.set(-1, -0.5, -1);
       scene.add(back);
 
+      // Raycaster for click-to-identify
+      const raycaster = new THREE.Raycaster();
+      const pointer = new THREE.Vector2();
+      let pointerDownPos = { x: 0, y: 0 };
+
+      const onPointerDown = (e: PointerEvent) => {
+        pointerDownPos = { x: e.clientX, y: e.clientY };
+      };
+
+      const onPointerUp = (e: PointerEvent) => {
+        // Ignore if it was a drag (orbit) rather than a click
+        const dx = e.clientX - pointerDownPos.x;
+        const dy = e.clientY - pointerDownPos.y;
+        if (Math.sqrt(dx * dx + dy * dy) > 5) return;
+
+        const rect = renderer.domElement.getBoundingClientRect();
+        pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+        raycaster.setFromCamera(pointer, camera);
+        const meshObjects = state.meshes
+          .filter((m): m is NonNullable<typeof m> => m !== null)
+          .map((m) => m.mesh);
+        const intersects = raycaster.intersectObjects(meshObjects, false);
+
+        if (intersects.length > 0) {
+          const hitMesh = intersects[0].object;
+          const meshIndex = state.meshes.findIndex((m) => m?.mesh === hitMesh);
+          if (meshIndex >= 0 && onMeshClickRef.current) {
+            onMeshClickRef.current(meshIndex);
+          }
+        }
+      };
+
+      renderer.domElement.addEventListener("pointerdown", onPointerDown);
+      renderer.domElement.addEventListener("pointerup", onPointerUp);
+
       const state = {
         scene,
         camera,
@@ -116,6 +161,8 @@ export const STLViewerComponent = forwardRef<STLViewerHandle, { className?: stri
 
       return () => {
         state.disposed = true;
+        renderer.domElement.removeEventListener("pointerdown", onPointerDown);
+        renderer.domElement.removeEventListener("pointerup", onPointerUp);
         if (state.resizeObserver) state.resizeObserver.disconnect();
         if (state.animId) cancelAnimationFrame(state.animId);
         clearMeshes(state);
