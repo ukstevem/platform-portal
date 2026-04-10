@@ -11,6 +11,9 @@ services:
       - documents
       - timesheets
       - operations
+      - scanner
+      - laserquote
+      - assembly-viewer
 
   portal:
     image: ghcr.io/ukstevem/platform-portal/portal:latest

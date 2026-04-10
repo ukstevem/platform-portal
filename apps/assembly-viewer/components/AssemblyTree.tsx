@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useCallback, memo } from "react";
-import { PRODUCTION_STAGES, type ProductionStage } from "./productionStages";
+import { PRODUCTION_STAGES } from "./productionStages";
+import type { StageInfo } from "./useNodeStages";
 
 export interface TreeNode {
   id: string;
@@ -22,7 +23,7 @@ interface AssemblyTreeProps {
   onHover: (nodeId: string | null) => void;
   selectedNodeId: string | null;
   sceneMeshIds?: Set<string>;
-  nodeStages?: Map<string, ProductionStage>;
+  nodeStages?: Map<string, StageInfo>;
   onNodeRightClick?: (nodeId: string, pos: { clientX: number; clientY: number }) => void;
 }
 
@@ -64,7 +65,7 @@ const TreeNodeRow = memo(function TreeNodeRow({
   onHover: (nodeId: string | null) => void;
   selectedNodeId: string | null;
   sceneMeshIds?: Set<string>;
-  nodeStages?: Map<string, ProductionStage>;
+  nodeStages?: Map<string, StageInfo>;
   onNodeRightClick?: (nodeId: string, pos: { clientX: number; clientY: number }) => void;
 }) {
   const [expanded, setExpanded] = useState(depth < 1);
@@ -75,7 +76,8 @@ const TreeNodeRow = memo(function TreeNodeRow({
     (hasChildren && node.children!.some((c) => stlMap[c.id] !== undefined));
   const isSelected = selectedNodeId === node.id;
   const isHoverable = sceneMeshIds?.has(node.id);
-  const stage = nodeStages?.get(node.id);
+  const stageInfo = nodeStages?.get(node.id);
+  const stage = stageInfo?.stage;
 
   const handleClick = useCallback(() => {
     if (isClickable) onSelect(node.id);

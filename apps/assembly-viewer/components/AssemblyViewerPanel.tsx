@@ -11,10 +11,11 @@ import {
   DIM_COLOR,
   DIM_OPACITY,
 } from "./STLViewer";
-import { useNodeStages } from "./useNodeStages";
+import { useNodeStages, type StageInfo } from "./useNodeStages";
 import { STAGE_MESH_COLORS, type ProductionStage } from "./productionStages";
 import { StageContextMenu } from "./StageContextMenu";
 import { StageLegend } from "./StageLegend";
+import { StageTable } from "./StageTable";
 
 interface AssemblyData {
   runId: string;
@@ -22,6 +23,32 @@ interface AssemblyData {
   summary: { total_assemblies: number; total_parts: number; total_solids: number };
   assembly_tree: TreeNode[];
   stl_map: Record<string, string>;
+}
+
+/**
+ * Walk the tree and assign path-based unique IDs to every node.
+ * The same sub-assembly reused in multiple places shares raw IDs;
+ * prefixing with the parent path makes each instance distinct.
+ * Returns a new stl_map keyed by the unique IDs.
+ */
+function assignUniqueIds(
+  nodes: TreeNode[],
+  origStlMap: Record<string, string>,
+  parentPath = ""
+): Record<string, string> {
+  const newStlMap: Record<string, string> = {};
+  for (const node of nodes) {
+    const rawId = node.id;
+    const uid = parentPath ? `${parentPath}/${rawId}` : rawId;
+    node.id = uid;
+    if (origStlMap[rawId]) {
+      newStlMap[uid] = origStlMap[rawId];
+    }
+    if (node.children) {
+      Object.assign(newStlMap, assignUniqueIds(node.children, origStlMap, uid));
+    }
+  }
+  return newStlMap;
 }
 
 function findNode(nodes: TreeNode[], id: string): TreeNode | null {
@@ -38,6 +65,15 @@ function findNode(nodes: TreeNode[], id: string): TreeNode | null {
 function canDrillInto(node: TreeNode, stlMap: Record<string, string>): boolean {
   if (!node.children || node.children.length === 0) return false;
   return node.children.some((c) => stlMap[c.id]);
+}
+
+/** Collect all descendant node IDs (inclusive) */
+function collectDescendantIds(node: TreeNode): string[] {
+  const ids = [node.id];
+  for (const child of node.children || []) {
+    ids.push(...collectDescendantIds(child));
+  }
+  return ids;
 }
 
 function buildPath(nodes: TreeNode[], targetId: string): TreeNode[] {
@@ -70,17 +106,18 @@ export function AssemblyViewerPanel() {
   const viewerRef = useRef<STLViewerHandle>(null);
   const meshMapRef = useRef<Map<string, number>>(new Map());
   const sceneNodesRef = useRef<TreeNode[]>([]);
+  const [tableNodes, setTableNodes] = useState<TreeNode[]>([]);
 
   // Production stage persistence
-  const { stages, setStage, clearStage } = useNodeStages(data?.runId ?? null);
+  const { stages, setStage, setStageBulk, clearStage } = useNodeStages(data?.runId ?? null);
   // Keep a ref so callbacks can read latest stages without re-creating
   const stagesRef = useRef(stages);
   stagesRef.current = stages;
 
   /** Get the color a node should be based on its stage (or default) */
   const getNodeColor = useCallback((nodeId: string): number => {
-    const stage = stagesRef.current.get(nodeId);
-    return stage ? STAGE_MESH_COLORS[stage] : DEFAULT_COLOR;
+    const info = stagesRef.current.get(nodeId);
+    return info ? STAGE_MESH_COLORS[info.stage] : DEFAULT_COLOR;
   }, []);
 
   /** Apply stage colors to all meshes in the current scene */
@@ -95,6 +132,9 @@ export function AssemblyViewerPanel() {
     fetch("/assembly/api/assembly-data/")
       .then((r) => r.json())
       .then((d: AssemblyData) => {
+        // Rewrite IDs to be unique per-instance (path-based)
+        const uniqueStlMap = assignUniqueIds(d.assembly_tree, d.stl_map);
+        d.stl_map = uniqueStlMap;
         setData(d);
         setLoading(false);
       })
@@ -137,6 +177,7 @@ export function AssemblyViewerPanel() {
 
       meshMapRef.current = newMeshMap;
       sceneNodesRef.current = loadList;
+      setTableNodes(loadList);
       setSceneMeshIds(new Set(newMeshMap.keys()));
       setHighlightedNodeId(null);
 
@@ -144,9 +185,9 @@ export function AssemblyViewerPanel() {
         await viewerRef.current.loadScene(items);
         // Apply stage colors after scene loads
         for (const [nid, idx] of newMeshMap) {
-          const stage = stagesRef.current.get(nid);
-          if (stage) {
-            viewerRef.current.setMeshColor(idx, STAGE_MESH_COLORS[stage], 1.0);
+          const info = stagesRef.current.get(nid);
+          if (info) {
+            viewerRef.current.setMeshColor(idx, STAGE_MESH_COLORS[info.stage], 1.0);
           }
         }
         setViewerStatus(
@@ -188,6 +229,7 @@ export function AssemblyViewerPanel() {
         const url = stlPath.replace(/^\/outputs\/stl\//, "/assembly/api/stl/");
         meshMapRef.current = new Map([[nodeId, 0]]);
         sceneNodesRef.current = [node];
+        setTableNodes([node]);
         setSceneMeshIds(new Set([nodeId]));
         setHighlightedNodeId(null);
         setBreadcrumb(buildPath(data.assembly_tree, nodeId));
@@ -264,20 +306,41 @@ export function AssemblyViewerPanel() {
     []
   );
 
-  // Stage selected from context menu
+  // Stage selected from context menu — cascades to all descendants for assemblies
   const handleStageSelect = useCallback(
     (stage: ProductionStage) => {
-      if (!contextMenu || !viewerRef.current) return;
+      if (!contextMenu || !data) return;
       const { nodeId } = contextMenu;
-      setStage(nodeId, stage);
-      // Immediately recolor the mesh if it's in the current scene
-      const meshIdx = meshMapRef.current.get(nodeId);
-      if (meshIdx !== undefined) {
-        viewerRef.current.setMeshColor(meshIdx, STAGE_MESH_COLORS[stage], 1.0);
+      const node = findNode(data.assembly_tree, nodeId);
+      if (!node) return;
+
+      const hasChildren = node.children && node.children.length > 0;
+      if (hasChildren) {
+        // Cascade to all descendants
+        const allIds = collectDescendantIds(node);
+        setStageBulk(allIds, stage);
+        // Recolor any visible meshes
+        if (viewerRef.current) {
+          for (const nid of allIds) {
+            const idx = meshMapRef.current.get(nid);
+            if (idx !== undefined) {
+              viewerRef.current.setMeshColor(idx, STAGE_MESH_COLORS[stage], 1.0);
+            }
+          }
+        }
+      } else {
+        // Single node
+        setStage(nodeId, stage);
+        if (viewerRef.current) {
+          const meshIdx = meshMapRef.current.get(nodeId);
+          if (meshIdx !== undefined) {
+            viewerRef.current.setMeshColor(meshIdx, STAGE_MESH_COLORS[stage], 1.0);
+          }
+        }
       }
       setHighlightedNodeId(null);
     },
-    [contextMenu, setStage]
+    [contextMenu, data, setStage, setStageBulk]
   );
 
   const handleStageClear = useCallback(() => {
@@ -454,7 +517,7 @@ export function AssemblyViewerPanel() {
             </div>
           </>
         )}
-        <div className="flex-1 relative">
+        <div className="flex-1 relative min-h-0">
           <STLViewerComponent
             ref={viewerRef}
             className="absolute inset-0"
@@ -462,6 +525,10 @@ export function AssemblyViewerPanel() {
             onMeshRightClick={handleMeshRightClick}
           />
         </div>
+        {/* Status table for current scene */}
+        {tableNodes.length > 0 && (
+          <StageTable sceneNodes={tableNodes} stages={stages} />
+        )}
       </div>
 
       {/* Stage context menu */}
@@ -469,7 +536,7 @@ export function AssemblyViewerPanel() {
         <StageContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
-          currentStage={stages.get(contextMenu.nodeId) ?? null}
+          currentStage={stages.get(contextMenu.nodeId)?.stage ?? null}
           onSelect={handleStageSelect}
           onClear={handleStageClear}
           onClose={() => setContextMenu(null)}

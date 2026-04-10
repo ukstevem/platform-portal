@@ -13,6 +13,9 @@ services:
       - documents
       - timesheets
       - operations
+      - scanner
+      - laserquote
+      - assembly-viewer
 
   portal:
     build:
