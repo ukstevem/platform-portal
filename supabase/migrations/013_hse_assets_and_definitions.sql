@@ -1,18 +1,18 @@
 -- Rename CRANE-xx assets to CRN-xx
--- Update any existing scan references first
-UPDATE document_incoming_scan SET asset_code = 'CRN-01' WHERE asset_code = 'CRANE-01';
-UPDATE document_incoming_scan SET asset_code = 'CRN-02' WHERE asset_code = 'CRANE-02';
-UPDATE document_incoming_scan SET asset_code = 'CRN-03' WHERE asset_code = 'CRANE-03';
-UPDATE document_incoming_scan SET asset_code = 'CRN-04' WHERE asset_code = 'CRANE-04';
-UPDATE document_incoming_scan SET asset_code = 'CRN-05' WHERE asset_code = 'CRANE-05';
-UPDATE document_incoming_scan SET asset_code = 'CRN-06' WHERE asset_code = 'CRANE-06';
--- Then rename the assets
+-- Rename the assets first (FK target), then update scan references
 UPDATE asset_register SET asset_code = 'CRN-01' WHERE asset_code = 'CRANE-01';
 UPDATE asset_register SET asset_code = 'CRN-02' WHERE asset_code = 'CRANE-02';
 UPDATE asset_register SET asset_code = 'CRN-03' WHERE asset_code = 'CRANE-03';
 UPDATE asset_register SET asset_code = 'CRN-04' WHERE asset_code = 'CRANE-04';
 UPDATE asset_register SET asset_code = 'CRN-05' WHERE asset_code = 'CRANE-05';
 UPDATE asset_register SET asset_code = 'CRN-06' WHERE asset_code = 'CRANE-06';
+-- Then update scan references
+UPDATE document_incoming_scan SET asset_code = 'CRN-01' WHERE asset_code = 'CRANE-01';
+UPDATE document_incoming_scan SET asset_code = 'CRN-02' WHERE asset_code = 'CRANE-02';
+UPDATE document_incoming_scan SET asset_code = 'CRN-03' WHERE asset_code = 'CRANE-03';
+UPDATE document_incoming_scan SET asset_code = 'CRN-04' WHERE asset_code = 'CRANE-04';
+UPDATE document_incoming_scan SET asset_code = 'CRN-05' WHERE asset_code = 'CRANE-05';
+UPDATE document_incoming_scan SET asset_code = 'CRN-06' WHERE asset_code = 'CRANE-06';
 
 -- FLTs
 INSERT INTO asset_register (asset_code, asset_name, category, location) VALUES

@@ -16,6 +16,8 @@ export interface SceneItem {
 export interface STLViewerHandle {
   loadScene: (items: SceneItem[]) => Promise<void>;
   setMeshColor: (index: number, color: number, opacity?: number) => void;
+  setClipPlane: (axis: "x" | "y" | "z", position: number, enabled: boolean) => void;
+  getSceneBounds: () => { min: [number, number, number]; max: [number, number, number] } | null;
   dispose: () => void;
 }
 
@@ -23,6 +25,8 @@ interface STLViewerProps {
   className?: string;
   /** Called when a mesh is clicked in the 3D view — returns the mesh index */
   onMeshClick?: (meshIndex: number) => void;
+  /** Called when a mesh is right-clicked — returns mesh index + pointer coords */
+  onMeshRightClick?: (meshIndex: number, pos: { clientX: number; clientY: number }) => void;
 }
 
 const DEFAULT_COLOR = 0x4a90d9;
@@ -31,10 +35,12 @@ const DIM_COLOR = 0x888888;
 const DIM_OPACITY = 0.18;
 
 export const STLViewerComponent = forwardRef<STLViewerHandle, STLViewerProps>(
-  function STLViewerComponent({ className, onMeshClick }, ref) {
+  function STLViewerComponent({ className, onMeshClick, onMeshRightClick }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const onMeshClickRef = useRef(onMeshClick);
     onMeshClickRef.current = onMeshClick;
+    const onMeshRightClickRef = useRef(onMeshRightClick);
+    onMeshRightClickRef.current = onMeshRightClick;
     const stateRef = useRef<{
       scene: THREE.Scene;
       camera: THREE.PerspectiveCamera;
@@ -71,7 +77,11 @@ export const STLViewerComponent = forwardRef<STLViewerHandle, STLViewerProps>(
       const renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setSize(w, h);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.localClippingEnabled = true;
       container.appendChild(renderer.domElement);
+
+      // Clipping plane — defaults to disabled
+      const clipPlane = new THREE.Plane(new THREE.Vector3(-1, 0, 0), 0);
 
       const controls = new OrbitControls(camera, renderer.domElement);
       controls.enableDamping = true;
@@ -120,8 +130,30 @@ export const STLViewerComponent = forwardRef<STLViewerHandle, STLViewerProps>(
         }
       };
 
+      const onContextMenu = (e: MouseEvent) => {
+        e.preventDefault();
+        const rect = renderer.domElement.getBoundingClientRect();
+        pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+        raycaster.setFromCamera(pointer, camera);
+        const meshObjects = state.meshes
+          .filter((m): m is NonNullable<typeof m> => m !== null)
+          .map((m) => m.mesh);
+        const intersects = raycaster.intersectObjects(meshObjects, false);
+
+        if (intersects.length > 0) {
+          const hitMesh = intersects[0].object;
+          const meshIndex = state.meshes.findIndex((m) => m?.mesh === hitMesh);
+          if (meshIndex >= 0 && onMeshRightClickRef.current) {
+            onMeshRightClickRef.current(meshIndex, { clientX: e.clientX, clientY: e.clientY });
+          }
+        }
+      };
+
       renderer.domElement.addEventListener("pointerdown", onPointerDown);
       renderer.domElement.addEventListener("pointerup", onPointerUp);
+      renderer.domElement.addEventListener("contextmenu", onContextMenu);
 
       const state = {
         scene,
@@ -134,6 +166,11 @@ export const STLViewerComponent = forwardRef<STLViewerHandle, STLViewerProps>(
         loadGen: 0,
         disposed: false,
         resizeObserver: null as ResizeObserver | null,
+        // Geometry cache: URL → BufferGeometry (survives scene clears)
+        geometryCache: new Map<string, THREE.BufferGeometry>(),
+        clipPlane,
+        clipEnabled: false,
+        sceneBounds: null as THREE.Box3 | null,
       };
 
       // Resize
@@ -163,9 +200,13 @@ export const STLViewerComponent = forwardRef<STLViewerHandle, STLViewerProps>(
         state.disposed = true;
         renderer.domElement.removeEventListener("pointerdown", onPointerDown);
         renderer.domElement.removeEventListener("pointerup", onPointerUp);
+        renderer.domElement.removeEventListener("contextmenu", onContextMenu);
         if (state.resizeObserver) state.resizeObserver.disconnect();
         if (state.animId) cancelAnimationFrame(state.animId);
         clearMeshes(state);
+        // Dispose cached geometries on full teardown
+        for (const geo of state.geometryCache.values()) geo.dispose();
+        state.geometryCache.clear();
         controls.dispose();
         renderer.dispose();
         if (renderer.domElement.parentNode) {
@@ -179,7 +220,7 @@ export const STLViewerComponent = forwardRef<STLViewerHandle, STLViewerProps>(
       for (const entry of state.meshes) {
         if (!entry) continue;
         state.scene.remove(entry.mesh);
-        entry.mesh.geometry.dispose();
+        // Don't dispose geometry — it's cached for reuse
         entry.material.dispose();
         state.scene.remove(entry.edges);
         entry.edges.geometry.dispose();
@@ -199,8 +240,67 @@ export const STLViewerComponent = forwardRef<STLViewerHandle, STLViewerProps>(
         const loader = new STLLoader();
         const combinedBox = new THREE.Box3();
 
+        const addToScene = (geometry: THREE.BufferGeometry, item: SceneItem, index: number) => {
+          const color = item.color ?? DEFAULT_COLOR;
+          const opacity = item.opacity ?? 1.0;
+
+          const material = new THREE.MeshPhongMaterial({
+            color,
+            specular: 0x222222,
+            shininess: 40,
+            flatShading: false,
+            transparent: opacity < 1.0,
+            opacity,
+            clippingPlanes: s.clipEnabled ? [s.clipPlane] : [],
+            clipShadows: true,
+          });
+
+          const mesh = new THREE.Mesh(geometry, material);
+
+          if (item.placement && item.placement.length === 16) {
+            const m4 = new THREE.Matrix4();
+            m4.fromArray(item.placement);
+            mesh.applyMatrix4(m4);
+          }
+
+          s.scene.add(mesh);
+
+          geometry.computeBoundingBox();
+          const meshBox = geometry.boundingBox!.clone();
+          if (item.placement && item.placement.length === 16) {
+            meshBox.applyMatrix4(mesh.matrix);
+          }
+          combinedBox.union(meshBox);
+
+          const edgesGeo = new THREE.EdgesGeometry(geometry, 15);
+          const edgesMat = new THREE.LineBasicMaterial({
+            color: 0x333333,
+            transparent: opacity < 1.0,
+            opacity: Math.min(opacity + 0.1, 1.0),
+            clippingPlanes: s.clipEnabled ? [s.clipPlane] : [],
+          });
+          const edges = new THREE.LineSegments(edgesGeo, edgesMat);
+          if (item.placement && item.placement.length === 16) {
+            const m4 = new THREE.Matrix4();
+            m4.fromArray(item.placement);
+            edges.applyMatrix4(m4);
+          }
+          s.scene.add(edges);
+
+          s.meshes[index] = { mesh, edges, material, edgesMat };
+        };
+
         const loadOne = (item: SceneItem, index: number) =>
           new Promise<void>((resolve, reject) => {
+            // Check geometry cache first
+            const cached = s.geometryCache.get(item.url);
+            if (cached) {
+              if (s.disposed || s.loadGen !== gen) { reject(new Error("load cancelled")); return; }
+              addToScene(cached, item, index);
+              resolve();
+              return;
+            }
+
             loader.load(
               item.url,
               (geometry) => {
@@ -209,51 +309,9 @@ export const STLViewerComponent = forwardRef<STLViewerHandle, STLViewerProps>(
                   return;
                 }
                 geometry.computeVertexNormals();
-
-                const color = item.color ?? DEFAULT_COLOR;
-                const opacity = item.opacity ?? 1.0;
-
-                const material = new THREE.MeshPhongMaterial({
-                  color,
-                  specular: 0x222222,
-                  shininess: 40,
-                  flatShading: false,
-                  transparent: opacity < 1.0,
-                  opacity,
-                });
-
-                const mesh = new THREE.Mesh(geometry, material);
-
-                if (item.placement && item.placement.length === 16) {
-                  const m4 = new THREE.Matrix4();
-                  m4.fromArray(item.placement);
-                  mesh.applyMatrix4(m4);
-                }
-
-                s.scene.add(mesh);
-
-                geometry.computeBoundingBox();
-                const meshBox = geometry.boundingBox!.clone();
-                if (item.placement && item.placement.length === 16) {
-                  meshBox.applyMatrix4(mesh.matrix);
-                }
-                combinedBox.union(meshBox);
-
-                const edgesGeo = new THREE.EdgesGeometry(geometry, 15);
-                const edgesMat = new THREE.LineBasicMaterial({
-                  color: 0x333333,
-                  transparent: opacity < 1.0,
-                  opacity: Math.min(opacity + 0.1, 1.0),
-                });
-                const edges = new THREE.LineSegments(edgesGeo, edgesMat);
-                if (item.placement && item.placement.length === 16) {
-                  const m4 = new THREE.Matrix4();
-                  m4.fromArray(item.placement);
-                  edges.applyMatrix4(m4);
-                }
-                s.scene.add(edges);
-
-                s.meshes[index] = { mesh, edges, material, edgesMat };
+                // Cache the geometry for reuse
+                s.geometryCache.set(item.url, geometry);
+                addToScene(geometry, item, index);
                 resolve();
               },
               undefined,
@@ -290,6 +348,12 @@ export const STLViewerComponent = forwardRef<STLViewerHandle, STLViewerProps>(
 
         s.controls.target.set(0, 0, 0);
         s.controls.update();
+
+        // Store scene bounds (after centering, so relative to origin)
+        const boundsBox = combinedBox.clone();
+        boundsBox.min.sub(center);
+        boundsBox.max.sub(center);
+        s.sceneBounds = boundsBox;
       },
 
       setMeshColor(index: number, color: number, opacity = 1.0) {
@@ -307,6 +371,42 @@ export const STLViewerComponent = forwardRef<STLViewerHandle, STLViewerProps>(
           entry.edgesMat.opacity = Math.min(opacity + 0.1, 1.0);
           entry.edgesMat.needsUpdate = true;
         }
+      },
+
+      setClipPlane(axis: "x" | "y" | "z", position: number, enabled: boolean) {
+        const s = stateRef.current;
+        if (!s) return;
+
+        s.clipEnabled = enabled;
+
+        // Set plane normal: clips everything on the positive side of the plane
+        const normal = new THREE.Vector3(
+          axis === "x" ? -1 : 0,
+          axis === "y" ? -1 : 0,
+          axis === "z" ? -1 : 0,
+        );
+        s.clipPlane.normal.copy(normal);
+        s.clipPlane.constant = position;
+
+        // Update all existing materials
+        const planes = enabled ? [s.clipPlane] : [];
+        for (const entry of s.meshes) {
+          if (!entry) continue;
+          entry.material.clippingPlanes = planes;
+          entry.material.needsUpdate = true;
+          entry.edgesMat.clippingPlanes = planes;
+          entry.edgesMat.needsUpdate = true;
+        }
+      },
+
+      getSceneBounds() {
+        const s = stateRef.current;
+        if (!s || !s.sceneBounds) return null;
+        const b = s.sceneBounds;
+        return {
+          min: [b.min.x, b.min.y, b.min.z] as [number, number, number],
+          max: [b.max.x, b.max.y, b.max.z] as [number, number, number],
+        };
       },
 
       dispose() {

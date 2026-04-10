@@ -1,28 +1,26 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { supabase } from "@platform/supabase/client";
 import { DropZone } from "./DropZone";
 
 type ImportFormProps = {
   onUploaded?: () => void;
 };
 
-const GRADE_OPTIONS: Record<string, { value: string; label: string }[]> = {
-  MILD: [
-    { value: "S275", label: "S275" },
-    { value: "S355", label: "S355" },
-  ],
-  STAINLESS: [
-    { value: "304", label: "304" },
-    { value: "316", label: "316" },
-  ],
-  AL: [
-    { value: "5083", label: "5083" },
-    { value: "6082", label: "6082" },
-  ],
+const CLASS_LABELS: Record<string, string> = {
+  MILD: "Mild Steel",
+  STAINLESS: "Stainless Steel",
+  AL: "Aluminium",
+};
+
+type MaterialRow = {
+  material_class: string;
+  grade: string;
 };
 
 export function ImportForm({ onUploaded }: ImportFormProps) {
+  const [materials, setMaterials] = useState<MaterialRow[]>([]);
   const [customer, setCustomer] = useState("");
   const [material, setMaterial] = useState("");
   const [grade, setGrade] = useState("");
@@ -35,7 +33,20 @@ export function ImportForm({ onUploaded }: ImportFormProps) {
   const [remCharge, setRemCharge] = useState(false);
   const [freeIssue, setFreeIssue] = useState(false);
 
-  const grades = material ? GRADE_OPTIONS[material] ?? [] : [];
+  useEffect(() => {
+    supabase
+      .from("laser_material")
+      .select("material_class, grade")
+      .eq("active", true)
+      .order("material_class")
+      .order("grade")
+      .then(({ data }) => {
+        if (data) setMaterials(data);
+      });
+  }, []);
+
+  const materialClasses = [...new Set(materials.map((m) => m.material_class))];
+  const grades = materials.filter((m) => m.material_class === material);
 
   return (
     <div className="space-y-6">
@@ -84,9 +95,9 @@ export function ImportForm({ onUploaded }: ImportFormProps) {
               className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
             >
               <option value="">Select...</option>
-              <option value="MILD">Mild Steel</option>
-              <option value="STAINLESS">Stainless Steel</option>
-              <option value="AL">Aluminium</option>
+              {materialClasses.map((mc) => (
+                <option key={mc} value={mc}>{CLASS_LABELS[mc] ?? mc}</option>
+              ))}
             </select>
           </div>
 
@@ -100,7 +111,7 @@ export function ImportForm({ onUploaded }: ImportFormProps) {
             >
               <option value="">{material ? "Select grade..." : "Select material first"}</option>
               {grades.map((g) => (
-                <option key={g.value} value={g.value}>{g.label}</option>
+                <option key={g.grade} value={g.grade}>{g.grade}</option>
               ))}
             </select>
           </div>

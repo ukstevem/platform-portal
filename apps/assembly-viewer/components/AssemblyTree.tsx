@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, memo } from "react";
+import { PRODUCTION_STAGES, type ProductionStage } from "./productionStages";
 
 export interface TreeNode {
   id: string;
@@ -20,8 +21,9 @@ interface AssemblyTreeProps {
   onSelect: (nodeId: string) => void;
   onHover: (nodeId: string | null) => void;
   selectedNodeId: string | null;
-  /** Set of nodeIds that have meshes loaded in the scene (for hover highlighting) */
   sceneMeshIds?: Set<string>;
+  nodeStages?: Map<string, ProductionStage>;
+  onNodeRightClick?: (nodeId: string, pos: { clientX: number; clientY: number }) => void;
 }
 
 const BADGE_LABELS: Record<string, string> = {
@@ -40,6 +42,10 @@ const BADGE_COLORS: Record<string, string> = {
   solid: "bg-purple-100 text-purple-700",
 };
 
+const STAGE_DOT_MAP = Object.fromEntries(
+  PRODUCTION_STAGES.map((s) => [s.key, s.dotClass])
+);
+
 const TreeNodeRow = memo(function TreeNodeRow({
   node,
   depth,
@@ -48,6 +54,8 @@ const TreeNodeRow = memo(function TreeNodeRow({
   onHover,
   selectedNodeId,
   sceneMeshIds,
+  nodeStages,
+  onNodeRightClick,
 }: {
   node: TreeNode;
   depth: number;
@@ -56,16 +64,18 @@ const TreeNodeRow = memo(function TreeNodeRow({
   onHover: (nodeId: string | null) => void;
   selectedNodeId: string | null;
   sceneMeshIds?: Set<string>;
+  nodeStages?: Map<string, ProductionStage>;
+  onNodeRightClick?: (nodeId: string, pos: { clientX: number; clientY: number }) => void;
 }) {
   const [expanded, setExpanded] = useState(depth < 1);
   const hasChildren = node.children && node.children.length > 0;
   const hasStl = stlMap[node.id] !== undefined;
-  // Assemblies are clickable if they have children with STLs, even without their own STL
   const isClickable =
     hasStl ||
     (hasChildren && node.children!.some((c) => stlMap[c.id] !== undefined));
   const isSelected = selectedNodeId === node.id;
   const isHoverable = sceneMeshIds?.has(node.id);
+  const stage = nodeStages?.get(node.id);
 
   const handleClick = useCallback(() => {
     if (isClickable) onSelect(node.id);
@@ -78,6 +88,16 @@ const TreeNodeRow = memo(function TreeNodeRow({
   const handleMouseLeave = useCallback(() => {
     if (isHoverable) onHover(null);
   }, [isHoverable, onHover]);
+
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      if (!onNodeRightClick || !hasStl) return;
+      e.preventDefault();
+      e.stopPropagation();
+      onNodeRightClick(node.id, { clientX: e.clientX, clientY: e.clientY });
+    },
+    [onNodeRightClick, hasStl, node.id]
+  );
 
   return (
     <li className="select-none" data-node-id={node.id}>
@@ -92,6 +112,7 @@ const TreeNodeRow = memo(function TreeNodeRow({
         onClick={handleClick}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
+        onContextMenu={handleContextMenu}
       >
         {/* Toggle arrow */}
         {hasChildren ? (
@@ -106,6 +127,11 @@ const TreeNodeRow = memo(function TreeNodeRow({
           </button>
         ) : (
           <span className="w-4 shrink-0" />
+        )}
+
+        {/* Stage dot */}
+        {stage && (
+          <span className={`w-2 h-2 rounded-full shrink-0 ${STAGE_DOT_MAP[stage]}`} />
         )}
 
         {/* Node name */}
@@ -159,6 +185,8 @@ const TreeNodeRow = memo(function TreeNodeRow({
               onHover={onHover}
               selectedNodeId={selectedNodeId}
               sceneMeshIds={sceneMeshIds}
+              nodeStages={nodeStages}
+              onNodeRightClick={onNodeRightClick}
             />
           ))}
         </ul>
@@ -174,6 +202,8 @@ export function AssemblyTree({
   onHover,
   selectedNodeId,
   sceneMeshIds,
+  nodeStages,
+  onNodeRightClick,
 }: AssemblyTreeProps) {
   return (
     <div className="overflow-auto h-full text-sm">
@@ -188,6 +218,8 @@ export function AssemblyTree({
             onHover={onHover}
             selectedNodeId={selectedNodeId}
             sceneMeshIds={sceneMeshIds}
+            nodeStages={nodeStages}
+            onNodeRightClick={onNodeRightClick}
           />
         ))}
       </ul>
