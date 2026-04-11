@@ -356,19 +356,63 @@ export function AssemblyViewerPanel() {
     setHighlightedNodeId(null);
   }, [contextMenu, clearStage]);
 
+  /** Check whether a node (or its children for multi-solid) has STL data */
+  const nodeHasDrawing = useCallback(
+    (nodeId: string): boolean => {
+      if (!data) return false;
+      if (data.stl_map[nodeId]) return true;
+      // Multi-solid parts: check children
+      const node = findNode(data.assembly_tree, nodeId);
+      if (node?.node_type === "part_multi_solid" && node.children) {
+        return node.children.some((c) => data.stl_map[c.id]);
+      }
+      return false;
+    },
+    [data]
+  );
+
+  /** Request a drawing for a single node and open the PDF */
+  const requestDrawing = useCallback(
+    async (targetNode: TreeNode, stlPath: string, assemblyName: string) => {
+      const rawNodeId = targetNode.id.includes("/")
+        ? targetNode.id.split("/").pop()!
+        : targetNode.id;
+
+      const res = await fetch("/assembly/api/drawing/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          run_id: data!.runId,
+          node_id: rawNodeId,
+          part_name: targetNode.name,
+          assembly_name: assemblyName,
+          project_name: data!.projectName,
+          stl_path: stlPath,
+          placement: targetNode.placement,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        console.error("Drawing generation failed:", err);
+        throw new Error((err as Record<string, string>).error || res.statusText);
+      }
+
+      const result = await res.json();
+      if (result.download_url) {
+        window.open(result.download_url, "_blank");
+      }
+    },
+    [data]
+  );
+
   /** Generate a shop drawing for the context-menu node and open the PDF */
   const handleDrawing = useCallback(async () => {
     if (!contextMenu || !data) return;
     const { nodeId } = contextMenu;
 
-    const stlPath = data.stl_map[nodeId];
-    if (!stlPath) return;
-
     const node = findNode(data.assembly_tree, nodeId);
     if (!node) return;
-
-    // Raw node ID is the last segment of the path-based unique ID
-    const rawNodeId = nodeId.includes("/") ? nodeId.split("/").pop()! : nodeId;
 
     // Parent assembly name from the tree path
     const path = buildPath(data.assembly_tree, nodeId);
@@ -376,39 +420,31 @@ export function AssemblyViewerPanel() {
 
     setDrawingLoading(true);
     try {
-      const res = await fetch("/assembly/api/drawing/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          run_id: data.runId,
-          node_id: rawNodeId,
-          part_name: node.name,
-          assembly_name: assemblyName,
-          project_name: data.projectName,
-          stl_path: stlPath,
-          placement: node.placement,
-        }),
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        console.error("Drawing generation failed:", err);
-        setViewerStatus(`Drawing failed: ${(err as Record<string, string>).error || res.statusText}`);
-        return;
-      }
-
-      const result = await res.json();
-      if (result.download_url) {
-        window.open(result.download_url, "_blank");
+      const stlPath = data.stl_map[nodeId];
+      if (stlPath) {
+        // Single STL — direct request
+        await requestDrawing(node, stlPath, assemblyName);
+      } else if (node.node_type === "part_multi_solid" && node.children) {
+        // Multi-solid: generate a drawing for each child that has an STL
+        const children = node.children.filter((c) => data.stl_map[c.id]);
+        if (children.length === 0) return;
+        setViewerStatus(`Generating ${children.length} drawings...`);
+        await Promise.all(
+          children.map((child) =>
+            requestDrawing(child, data.stl_map[child.id], node.name)
+          )
+        );
       }
     } catch (err) {
       console.error("Drawing request error:", err);
-      setViewerStatus("Failed to reach drawing service");
+      setViewerStatus(
+        `Drawing failed: ${err instanceof Error ? err.message : "unknown error"}`
+      );
     } finally {
       setDrawingLoading(false);
       setContextMenu(null);
     }
-  }, [contextMenu, data]);
+  }, [contextMenu, data, requestDrawing]);
 
   const handleHover = useCallback(
     (nodeId: string | null) => {
@@ -596,7 +632,7 @@ export function AssemblyViewerPanel() {
           onSelect={handleStageSelect}
           onClear={handleStageClear}
           onClose={() => setContextMenu(null)}
-          hasStl={!!data?.stl_map[contextMenu.nodeId]}
+          hasStl={nodeHasDrawing(contextMenu.nodeId)}
           onDrawing={handleDrawing}
           drawingLoading={drawingLoading}
         />
