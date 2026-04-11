@@ -356,10 +356,18 @@ export function AssemblyViewerPanel() {
     setHighlightedNodeId(null);
   }, [contextMenu, clearStage]);
 
-  /** Check whether a node (or its children for multi-solid) has STL data */
+  /** Check whether a node (or its children for multi-solid) can have a drawing generated */
   const nodeHasDrawing = useCallback(
     (nodeId: string): boolean => {
       if (!data) return false;
+
+      // If any ancestor is marked "bought_out", suppress drawing on descendants.
+      // Only the BO assembly itself may have a drawing generated.
+      const path = buildPath(data.assembly_tree, nodeId);
+      for (let i = 0; i < path.length - 1; i++) {
+        if (stages.get(path[i].id)?.stage === "bought_out") return false;
+      }
+
       if (data.stl_map[nodeId]) return true;
       // Multi-solid parts: check children
       const node = findNode(data.assembly_tree, nodeId);
@@ -368,7 +376,7 @@ export function AssemblyViewerPanel() {
       }
       return false;
     },
-    [data]
+    [data, stages]
   );
 
   /** Request a drawing for a single node and open the PDF */

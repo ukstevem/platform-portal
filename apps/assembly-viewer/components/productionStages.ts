@@ -1,4 +1,5 @@
 export type ProductionStage =
+  | "bought_out"
   | "not_started"
   | "on-order"
   | "stock"
@@ -18,6 +19,7 @@ export interface StageDefinition {
 }
 
 export const PRODUCTION_STAGES: StageDefinition[] = [
+  { key: "bought_out",  label: "Bought Out",  meshColor: 0x78716c, dotClass: "bg-stone-500" },
   { key: "not_started", label: "Not Started", meshColor: 0xbbbbbb, dotClass: "bg-gray-400" },
   { key: "on-order",    label: "On Order",    meshColor: 0xf97316, dotClass: "bg-orange-500" },
   { key: "stock",       label: "Stock",       meshColor: 0x06b6d4, dotClass: "bg-cyan-500" },
