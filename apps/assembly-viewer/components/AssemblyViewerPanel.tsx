@@ -23,6 +23,7 @@ interface AssemblyData {
   summary: { total_assemblies: number; total_parts: number; total_solids: number };
   assembly_tree: TreeNode[];
   stl_map: Record<string, string>;
+  classifications: Record<string, string>;
 }
 
 /**
@@ -34,9 +35,11 @@ interface AssemblyData {
 function assignUniqueIds(
   nodes: TreeNode[],
   origStlMap: Record<string, string>,
+  origClassifications: Record<string, string>,
   parentPath = ""
-): Record<string, string> {
+): { stlMap: Record<string, string>; classifications: Record<string, string> } {
   const newStlMap: Record<string, string> = {};
+  const newClassifications: Record<string, string> = {};
   for (const node of nodes) {
     const rawId = node.id;
     const uid = parentPath ? `${parentPath}/${rawId}` : rawId;
@@ -44,11 +47,16 @@ function assignUniqueIds(
     if (origStlMap[rawId]) {
       newStlMap[uid] = origStlMap[rawId];
     }
+    if (origClassifications[rawId]) {
+      newClassifications[uid] = origClassifications[rawId];
+    }
     if (node.children) {
-      Object.assign(newStlMap, assignUniqueIds(node.children, origStlMap, uid));
+      const child = assignUniqueIds(node.children, origStlMap, origClassifications, uid);
+      Object.assign(newStlMap, child.stlMap);
+      Object.assign(newClassifications, child.classifications);
     }
   }
-  return newStlMap;
+  return { stlMap: newStlMap, classifications: newClassifications };
 }
 
 function findNode(nodes: TreeNode[], id: string): TreeNode | null {
@@ -135,8 +143,9 @@ export function AssemblyViewerPanel() {
       .then((r) => r.json())
       .then((d: AssemblyData) => {
         // Rewrite IDs to be unique per-instance (path-based)
-        const uniqueStlMap = assignUniqueIds(d.assembly_tree, d.stl_map);
-        d.stl_map = uniqueStlMap;
+        const result = assignUniqueIds(d.assembly_tree, d.stl_map, d.classifications || {});
+        d.stl_map = result.stlMap;
+        d.classifications = result.classifications;
         setData(d);
         setLoading(false);
       })
@@ -361,11 +370,15 @@ export function AssemblyViewerPanel() {
     (nodeId: string): boolean => {
       if (!data) return false;
 
-      // If any ancestor is marked "bought_out", suppress drawing on descendants.
-      // Only the BO assembly itself may have a drawing generated.
+      // If any ancestor is classified as bought-out/exclude, or manually
+      // staged as bought_out, suppress drawings on descendants.
+      // Only the classified/staged node itself may have a drawing generated.
       const path = buildPath(data.assembly_tree, nodeId);
       for (let i = 0; i < path.length - 1; i++) {
-        if (stages.get(path[i].id)?.stage === "bought_out") return false;
+        const ancestorId = path[i].id;
+        const cls = data.classifications[ancestorId];
+        if (cls === "bought-out" || cls === "exclude") return false;
+        if (stages.get(ancestorId)?.stage === "bought_out") return false;
       }
 
       if (data.stl_map[nodeId]) return true;
