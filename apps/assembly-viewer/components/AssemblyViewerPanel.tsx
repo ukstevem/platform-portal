@@ -428,11 +428,7 @@ export function AssemblyViewerPanel() {
 
     setDrawingLoading(true);
     try {
-      const stlPath = data.stl_map[nodeId];
-      if (stlPath) {
-        // Single STL — direct request
-        await requestDrawing(node, stlPath, assemblyName);
-      } else if (node.node_type === "part_multi_solid" && node.children) {
+      if (node.node_type === "part_multi_solid" && node.children) {
         // Multi-solid: generate a drawing for each child that has an STL
         const children = node.children.filter((c) => data.stl_map[c.id]);
         if (children.length === 0) return;
@@ -442,6 +438,9 @@ export function AssemblyViewerPanel() {
             requestDrawing(child, data.stl_map[child.id], node.name)
           )
         );
+      } else if (data.stl_map[nodeId]) {
+        // Single STL — direct request
+        await requestDrawing(node, data.stl_map[nodeId], assemblyName);
       }
     } catch (err) {
       console.error("Drawing request error:", err);
