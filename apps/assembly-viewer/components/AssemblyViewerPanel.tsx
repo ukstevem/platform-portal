@@ -429,15 +429,19 @@ export function AssemblyViewerPanel() {
     setDrawingLoading(true);
     try {
       if (node.node_type === "part_multi_solid" && node.children) {
-        // Multi-solid: generate a drawing for each child that has an STL
+        // Multi-solid: try per-child drawings first
         const children = node.children.filter((c) => data.stl_map[c.id]);
-        if (children.length === 0) return;
-        setViewerStatus(`Generating ${children.length} drawings...`);
-        await Promise.all(
-          children.map((child) =>
-            requestDrawing(child, data.stl_map[child.id], node.name)
-          )
-        );
+        if (children.length > 0) {
+          setViewerStatus(`Generating ${children.length} drawings...`);
+          await Promise.all(
+            children.map((child) =>
+              requestDrawing(child, data.stl_map[child.id], node.name)
+            )
+          );
+        } else if (data.stl_map[nodeId]) {
+          // Children don't have individual STLs — fall back to the part's own STL
+          await requestDrawing(node, data.stl_map[nodeId], assemblyName);
+        }
       } else if (data.stl_map[nodeId]) {
         // Single STL — direct request
         await requestDrawing(node, data.stl_map[nodeId], assemblyName);
