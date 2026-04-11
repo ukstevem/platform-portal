@@ -102,6 +102,8 @@ export function AssemblyViewerPanel() {
   const [clipBounds, setClipBounds] = useState<{ min: number; max: number }>({ min: -1000, max: 1000 });
   // Context menu for stage tagging
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null);
+  // Drawing generation
+  const [drawingLoading, setDrawingLoading] = useState(false);
 
   const viewerRef = useRef<STLViewerHandle>(null);
   const meshMapRef = useRef<Map<string, number>>(new Map());
@@ -354,6 +356,60 @@ export function AssemblyViewerPanel() {
     setHighlightedNodeId(null);
   }, [contextMenu, clearStage]);
 
+  /** Generate a shop drawing for the context-menu node and open the PDF */
+  const handleDrawing = useCallback(async () => {
+    if (!contextMenu || !data) return;
+    const { nodeId } = contextMenu;
+
+    const stlPath = data.stl_map[nodeId];
+    if (!stlPath) return;
+
+    const node = findNode(data.assembly_tree, nodeId);
+    if (!node) return;
+
+    // Raw node ID is the last segment of the path-based unique ID
+    const rawNodeId = nodeId.includes("/") ? nodeId.split("/").pop()! : nodeId;
+
+    // Parent assembly name from the tree path
+    const path = buildPath(data.assembly_tree, nodeId);
+    const assemblyName = path.length >= 2 ? path[path.length - 2].name : "";
+
+    setDrawingLoading(true);
+    try {
+      const res = await fetch("/assembly/api/drawing/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          run_id: data.runId,
+          node_id: rawNodeId,
+          part_name: node.name,
+          assembly_name: assemblyName,
+          project_name: data.projectName,
+          stl_path: stlPath,
+          placement: node.placement,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        console.error("Drawing generation failed:", err);
+        setViewerStatus(`Drawing failed: ${(err as Record<string, string>).error || res.statusText}`);
+        return;
+      }
+
+      const result = await res.json();
+      if (result.download_url) {
+        window.open(result.download_url, "_blank");
+      }
+    } catch (err) {
+      console.error("Drawing request error:", err);
+      setViewerStatus("Failed to reach drawing service");
+    } finally {
+      setDrawingLoading(false);
+      setContextMenu(null);
+    }
+  }, [contextMenu, data]);
+
   const handleHover = useCallback(
     (nodeId: string | null) => {
       if (!viewerRef.current) return;
@@ -540,6 +596,9 @@ export function AssemblyViewerPanel() {
           onSelect={handleStageSelect}
           onClear={handleStageClear}
           onClose={() => setContextMenu(null)}
+          hasStl={!!data?.stl_map[contextMenu.nodeId]}
+          onDrawing={handleDrawing}
+          drawingLoading={drawingLoading}
         />
       )}
     </div>

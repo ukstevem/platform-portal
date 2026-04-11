@@ -10,6 +10,10 @@ interface StageContextMenuProps {
   onSelect: (stage: ProductionStage) => void;
   onClear: () => void;
   onClose: () => void;
+  /** Show "View Shop Drawing" option (only for parts with STL) */
+  hasStl?: boolean;
+  onDrawing?: () => void;
+  drawingLoading?: boolean;
 }
 
 export function StageContextMenu({
@@ -19,6 +23,9 @@ export function StageContextMenu({
   onSelect,
   onClear,
   onClose,
+  hasStl,
+  onDrawing,
+  drawingLoading,
 }: StageContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -40,8 +47,9 @@ export function StageContextMenu({
   }, [onClose]);
 
   // Keep menu on-screen
-  const menuWidth = 180;
-  const menuHeight = PRODUCTION_STAGES.length * 32 + (currentStage ? 40 : 8);
+  const menuWidth = 200;
+  const drawingHeight = hasStl ? 40 : 0;
+  const menuHeight = PRODUCTION_STAGES.length * 32 + (currentStage ? 40 : 8) + drawingHeight;
   const left = Math.min(x, window.innerWidth - menuWidth - 8);
   const top = Math.min(y, window.innerHeight - menuHeight - 8);
 
@@ -51,6 +59,25 @@ export function StageContextMenu({
       className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-1 select-none"
       style={{ left, top, width: menuWidth }}
     >
+      {hasStl && onDrawing && (
+        <>
+          <button
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            disabled={drawingLoading}
+            onClick={() => {
+              onDrawing();
+            }}
+          >
+            <svg className="w-4 h-4 shrink-0 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+            </svg>
+            <span className="flex-1 text-left font-medium">
+              {drawingLoading ? "Generating..." : "View Shop Drawing"}
+            </span>
+          </button>
+          <div className="border-t border-gray-100 my-1" />
+        </>
+      )}
       <div className="px-3 py-1 text-[10px] text-gray-400 uppercase tracking-wide">
         Production Stage
       </div>
