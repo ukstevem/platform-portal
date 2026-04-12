@@ -318,6 +318,34 @@ export function AssemblyViewerPanel() {
     []
   );
 
+  // Table row click → highlight the part in the 3D viewer
+  const handleTableRowClick = useCallback(
+    (nodeId: string) => {
+      if (!viewerRef.current) return;
+      setContextMenu(null);
+      const meshMap = meshMapRef.current;
+      const meshIdx = meshMap.get(nodeId);
+      if (meshIdx === undefined) return;
+
+      setHighlightedNodeId(nodeId);
+      setSelectedNodeId(nodeId);
+      for (const [nid, idx] of meshMap) {
+        if (nid === nodeId) {
+          viewerRef.current.setMeshColor(idx, HIGHLIGHT_COLOR, 1.0);
+        } else {
+          viewerRef.current.setMeshColor(idx, DIM_COLOR, DIM_OPACITY);
+        }
+      }
+
+      // Scroll tree to the node
+      requestAnimationFrame(() => {
+        const el = document.querySelector(`[data-node-id="${nodeId}"]`);
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    },
+    []
+  );
+
   // Stage selected from context menu — cascades to all descendants for assemblies
   const handleStageSelect = useCallback(
     (stage: ProductionStage) => {
@@ -699,6 +727,9 @@ export function AssemblyViewerPanel() {
             projectName={data?.projectName}
             assemblyName={breadcrumb[breadcrumb.length - 1]?.name}
             drawingUrls={drawingUrls}
+            onRowClick={handleTableRowClick}
+            onRowRightClick={handleNodeRightClick}
+            selectedNodeId={highlightedNodeId}
           />
         )}
       </div>

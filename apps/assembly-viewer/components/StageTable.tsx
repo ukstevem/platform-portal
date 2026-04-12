@@ -12,6 +12,9 @@ interface StageTableProps {
   projectName?: string;
   assemblyName?: string;
   drawingUrls?: Map<string, string>;
+  onRowClick?: (nodeId: string) => void;
+  onRowRightClick?: (nodeId: string, pos: { clientX: number; clientY: number }) => void;
+  selectedNodeId?: string | null;
 }
 
 function formatDate(iso: string): string {
@@ -39,7 +42,7 @@ function buildRows(sceneNodes: TreeNode[], stages: Map<string, StageInfo>) {
   });
 }
 
-export function StageTable({ sceneNodes, stages, projectName = "", assemblyName = "", drawingUrls }: StageTableProps) {
+export function StageTable({ sceneNodes, stages, projectName = "", assemblyName = "", drawingUrls, onRowClick, onRowRightClick, selectedNodeId }: StageTableProps) {
   const [pdfLoading, setPdfLoading] = useState(false);
 
   const handleExcelDownload = useCallback(() => {
@@ -125,7 +128,15 @@ export function StageTable({ sceneNodes, stages, projectName = "", assemblyName 
           {sceneNodes.map((node) => {
             const info = stages.get(node.id);
             return (
-              <tr key={node.id} className="border-b border-gray-100 hover:bg-gray-50">
+              <tr
+                key={node.id}
+                className={`border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${selectedNodeId === node.id ? "bg-blue-50" : ""}`}
+                onClick={() => onRowClick?.(node.id)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  onRowRightClick?.(node.id, { clientX: e.clientX, clientY: e.clientY });
+                }}
+              >
                 <td className="px-3 py-1 text-gray-800 font-medium truncate max-w-[200px]" title={node.name}>
                   {node.name}
                 </td>
