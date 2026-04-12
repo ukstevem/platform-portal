@@ -112,6 +112,7 @@ export function AssemblyViewerPanel() {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null);
   // Drawing generation
   const [drawingLoading, setDrawingLoading] = useState(false);
+  const [drawingUrls, setDrawingUrls] = useState<Map<string, string>>(new Map());
 
   const viewerRef = useRef<STLViewerHandle>(null);
   const meshMapRef = useRef<Map<string, number>>(new Map());
@@ -382,19 +383,25 @@ export function AssemblyViewerPanel() {
       }
 
       if (data.stl_map[nodeId]) return true;
-      // Multi-solid parts: check children
       const node = findNode(data.assembly_tree, nodeId);
-      if (node?.node_type === "part_multi_solid" && node.children) {
+      if (!node?.children) return false;
+      // Multi-solid parts: check children for individual STLs
+      if (node.node_type === "part_multi_solid") {
         return node.children.some((c) => data.stl_map[c.id]);
+      }
+      // Assemblies: check if any children have STLs
+      if (node.node_type === "assembly") {
+        return node.children.some((c) => data.stl_map[c.id] ||
+          (c.node_type === "part_multi_solid" && c.children?.some((s) => data.stl_map[s.id])));
       }
       return false;
     },
     [data, stages]
   );
 
-  /** Request a drawing for a single node and open the PDF */
+  /** Request a drawing for a single node — returns { nodeId, url } */
   const requestDrawing = useCallback(
-    async (targetNode: TreeNode, stlPath: string, assemblyName: string, placement?: number[]) => {
+    async (targetNode: TreeNode, stlPath: string, assemblyName: string, placement?: number[]): Promise<{ nodeId: string; url: string } | null> => {
       const rawNodeId = targetNode.id.includes("/")
         ? targetNode.id.split("/").pop()!
         : targetNode.id;
@@ -420,14 +427,55 @@ export function AssemblyViewerPanel() {
       }
 
       const result = await res.json();
-      if (result.download_url) {
-        window.open(result.download_url, "_blank");
-      }
+      return result.download_url ? { nodeId: targetNode.id, url: result.download_url } : null;
     },
     [data]
   );
 
-  /** Generate a shop drawing for the context-menu node and open the PDF */
+  /** Collect drawing requests for a node and all relevant children */
+  const collectDrawingRequests = useCallback(
+    (node: TreeNode, assemblyName: string): Promise<{ nodeId: string; url: string } | null>[] => {
+      if (!data) return [];
+      const requests: Promise<{ nodeId: string; url: string } | null>[] = [];
+
+      if (node.node_type === "assembly" && node.children) {
+        // Assembly: generate for the assembly itself + all children
+        if (data.stl_map[node.id]) {
+          requests.push(requestDrawing(node, data.stl_map[node.id], assemblyName));
+        }
+        for (const child of node.children) {
+          if (child.node_type === "part_multi_solid" && child.children) {
+            const solids = child.children.filter((s) => data.stl_map[s.id]);
+            if (solids.length > 0) {
+              for (const solid of solids) {
+                requests.push(requestDrawing(solid, data.stl_map[solid.id], child.name, child.placement));
+              }
+            } else if (data.stl_map[child.id]) {
+              requests.push(requestDrawing(child, data.stl_map[child.id], node.name, child.placement));
+            }
+          } else if (data.stl_map[child.id]) {
+            requests.push(requestDrawing(child, data.stl_map[child.id], node.name));
+          }
+        }
+      } else if (node.node_type === "part_multi_solid" && node.children) {
+        const children = node.children.filter((c) => data.stl_map[c.id]);
+        if (children.length > 0) {
+          for (const child of children) {
+            requests.push(requestDrawing(child, data.stl_map[child.id], node.name, node.placement));
+          }
+        } else if (data.stl_map[node.id]) {
+          requests.push(requestDrawing(node, data.stl_map[node.id], assemblyName));
+        }
+      } else if (data.stl_map[node.id]) {
+        requests.push(requestDrawing(node, data.stl_map[node.id], assemblyName));
+      }
+
+      return requests;
+    },
+    [data, requestDrawing]
+  );
+
+  /** Generate shop drawings for the context-menu node and open/store results */
   const handleDrawing = useCallback(async () => {
     if (!contextMenu || !data) return;
     const { nodeId } = contextMenu;
@@ -435,29 +483,31 @@ export function AssemblyViewerPanel() {
     const node = findNode(data.assembly_tree, nodeId);
     if (!node) return;
 
-    // Parent assembly name from the tree path
     const path = buildPath(data.assembly_tree, nodeId);
     const assemblyName = path.length >= 2 ? path[path.length - 2].name : "";
 
+    const requests = collectDrawingRequests(node, assemblyName);
+    if (requests.length === 0) return;
+
+    const isBatch = requests.length > 1;
+    if (isBatch) {
+      setViewerStatus(`Generating ${requests.length} drawings...`);
+    }
+
     setDrawingLoading(true);
     try {
-      if (node.node_type === "part_multi_solid" && node.children) {
-        // Multi-solid: try per-child drawings first
-        const children = node.children.filter((c) => data.stl_map[c.id]);
-        if (children.length > 0) {
-          setViewerStatus(`Generating ${children.length} drawings...`);
-          await Promise.all(
-            children.map((child) =>
-              requestDrawing(child, data.stl_map[child.id], node.name, node.placement)
-            )
-          );
-        } else if (data.stl_map[nodeId]) {
-          // Children don't have individual STLs — fall back to the part's own STL
-          await requestDrawing(node, data.stl_map[nodeId], assemblyName);
-        }
-      } else if (data.stl_map[nodeId]) {
-        // Single STL — direct request
-        await requestDrawing(node, data.stl_map[nodeId], assemblyName);
+      const results = await Promise.all(requests);
+      const newUrls = new Map(drawingUrls);
+      for (const r of results) {
+        if (r) newUrls.set(r.nodeId, r.url);
+      }
+      setDrawingUrls(newUrls);
+
+      if (isBatch) {
+        setViewerStatus(`${results.filter(Boolean).length} drawings ready`);
+      } else if (results[0]?.url) {
+        // Single drawing — open in new tab
+        window.open(results[0].url, "_blank");
       }
     } catch (err) {
       console.error("Drawing request error:", err);
@@ -468,7 +518,7 @@ export function AssemblyViewerPanel() {
       setDrawingLoading(false);
       setContextMenu(null);
     }
-  }, [contextMenu, data, requestDrawing]);
+  }, [contextMenu, data, collectDrawingRequests, drawingUrls]);
 
   const handleHover = useCallback(
     (nodeId: string | null) => {
@@ -648,6 +698,7 @@ export function AssemblyViewerPanel() {
             stages={stages}
             projectName={data?.projectName}
             assemblyName={breadcrumb[breadcrumb.length - 1]?.name}
+            drawingUrls={drawingUrls}
           />
         )}
       </div>

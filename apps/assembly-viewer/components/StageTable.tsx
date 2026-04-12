@@ -11,6 +11,7 @@ interface StageTableProps {
   stages: Map<string, StageInfo>;
   projectName?: string;
   assemblyName?: string;
+  drawingUrls?: Map<string, string>;
 }
 
 function formatDate(iso: string): string {
@@ -38,7 +39,7 @@ function buildRows(sceneNodes: TreeNode[], stages: Map<string, StageInfo>) {
   });
 }
 
-export function StageTable({ sceneNodes, stages, projectName = "", assemblyName = "" }: StageTableProps) {
+export function StageTable({ sceneNodes, stages, projectName = "", assemblyName = "", drawingUrls }: StageTableProps) {
   const [pdfLoading, setPdfLoading] = useState(false);
 
   const handleExcelDownload = useCallback(() => {
@@ -117,6 +118,7 @@ export function StageTable({ sceneNodes, stages, projectName = "", assemblyName 
             <th className="text-left px-3 py-1.5 font-medium text-gray-500">Type</th>
             <th className="text-left px-3 py-1.5 font-medium text-gray-500">Status</th>
             <th className="text-left px-3 py-1.5 font-medium text-gray-500">Updated</th>
+            <th className="text-left px-3 py-1.5 font-medium text-gray-500">Drawing</th>
           </tr>
         </thead>
         <tbody>
@@ -142,6 +144,20 @@ export function StageTable({ sceneNodes, stages, projectName = "", assemblyName 
                 </td>
                 <td className="px-3 py-1 text-gray-400">
                   {info ? formatDate(info.updatedAt) : ""}
+                </td>
+                <td className="px-3 py-1">
+                  {drawingUrls?.get(node.id) ? (
+                    <a
+                      href={drawingUrls.get(node.id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:underline"
+                    >
+                      View
+                    </a>
+                  ) : (
+                    <span className="text-gray-300">--</span>
+                  )}
                 </td>
               </tr>
             );
