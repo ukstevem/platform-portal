@@ -394,7 +394,7 @@ export function AssemblyViewerPanel() {
 
   /** Request a drawing for a single node and open the PDF */
   const requestDrawing = useCallback(
-    async (targetNode: TreeNode, stlPath: string, assemblyName: string) => {
+    async (targetNode: TreeNode, stlPath: string, assemblyName: string, placement?: number[]) => {
       const rawNodeId = targetNode.id.includes("/")
         ? targetNode.id.split("/").pop()!
         : targetNode.id;
@@ -409,7 +409,7 @@ export function AssemblyViewerPanel() {
           assembly_name: assemblyName,
           project_name: data!.projectName,
           stl_path: stlPath,
-          placement: targetNode.placement,
+          placement: placement ?? targetNode.placement,
         }),
       });
 
@@ -448,7 +448,7 @@ export function AssemblyViewerPanel() {
           setViewerStatus(`Generating ${children.length} drawings...`);
           await Promise.all(
             children.map((child) =>
-              requestDrawing(child, data.stl_map[child.id], node.name)
+              requestDrawing(child, data.stl_map[child.id], node.name, node.placement)
             )
           );
         } else if (data.stl_map[nodeId]) {
