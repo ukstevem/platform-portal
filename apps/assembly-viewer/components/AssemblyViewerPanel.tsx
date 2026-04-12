@@ -633,7 +633,7 @@ export function AssemblyViewerPanel() {
             </div>
           </>
         )}
-        <div className="flex-1 relative min-h-0">
+        <div className="flex-1 relative min-h-0 overflow-hidden">
           <STLViewerComponent
             ref={viewerRef}
             className="absolute inset-0"
