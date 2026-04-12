@@ -319,7 +319,13 @@ export const STLViewerComponent = forwardRef<STLViewerHandle, STLViewerProps>(
             );
           });
 
-        await Promise.all(items.map((item, i) => loadOne(item, i)));
+        // Load in batches to avoid overwhelming the proxy with concurrent requests
+        const BATCH_SIZE = 20;
+        for (let b = 0; b < items.length; b += BATCH_SIZE) {
+          const batch = items.slice(b, b + BATCH_SIZE);
+          await Promise.all(batch.map((item, j) => loadOne(item, b + j)));
+          if (s.disposed || s.loadGen !== gen) return;
+        }
 
         if (s.disposed || s.loadGen !== gen) return;
 
