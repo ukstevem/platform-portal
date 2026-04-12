@@ -9,15 +9,16 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@platform/auth": "workspace:*",
+    "@platform/supabase": "workspace:*",
+    "@platform/ui": "workspace:*",
     "@supabase/supabase-js": "^2.84.0",
+    "@types/three": "^0.164.0",
     "next": "16.1.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "@platform/supabase": "workspace:*",
-    "@platform/auth": "workspace:*",
-    "@platform/ui": "workspace:*",
     "three": "^0.164.1",
-    "@types/three": "^0.164.0"
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

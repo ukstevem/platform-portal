@@ -1,13 +1,16 @@
 "use client";
 
+import { useCallback, useState } from "react";
 import { PRODUCTION_STAGES } from "./productionStages";
 import type { StageInfo } from "./useNodeStages";
 import type { TreeNode } from "./AssemblyTree";
+import * as XLSX from "xlsx";
 
 interface StageTableProps {
-  /** The nodes currently loaded in the scene */
   sceneNodes: TreeNode[];
   stages: Map<string, StageInfo>;
+  projectName?: string;
+  assemblyName?: string;
 }
 
 function formatDate(iso: string): string {
@@ -23,13 +26,92 @@ const STAGE_LABEL_MAP = Object.fromEntries(
   PRODUCTION_STAGES.map((s) => [s.key, s.label])
 );
 
-export function StageTable({ sceneNodes, stages }: StageTableProps) {
+function buildRows(sceneNodes: TreeNode[], stages: Map<string, StageInfo>) {
+  return sceneNodes.map((node) => {
+    const info = stages.get(node.id);
+    return {
+      name: node.name,
+      type: node.node_type.replace(/_/g, " "),
+      status: info ? STAGE_LABEL_MAP[info.stage] || info.stage : "",
+      updated: info ? formatDate(info.updatedAt) : "",
+    };
+  });
+}
+
+export function StageTable({ sceneNodes, stages, projectName = "", assemblyName = "" }: StageTableProps) {
+  const [pdfLoading, setPdfLoading] = useState(false);
+
+  const handleExcelDownload = useCallback(() => {
+    const rows = buildRows(sceneNodes, stages);
+    const ws = XLSX.utils.json_to_sheet(rows.map((r) => ({
+      Name: r.name,
+      Type: r.type,
+      Status: r.status,
+      Updated: r.updated,
+    })));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Part Status");
+    const filename = `${projectName || "status"}_${assemblyName || "parts"}.xlsx`
+      .replace(/[^a-zA-Z0-9_\-.]/g, "_");
+    XLSX.writeFile(wb, filename);
+  }, [sceneNodes, stages, projectName, assemblyName]);
+
+  const handlePdfDownload = useCallback(async () => {
+    const rows = buildRows(sceneNodes, stages);
+    setPdfLoading(true);
+    try {
+      const res = await fetch("/assembly/api/export-pdf/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectName, assemblyName, rows }),
+      });
+      if (!res.ok) {
+        console.error("PDF export failed:", res.statusText);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = res.headers.get("Content-Disposition")?.match(/filename="(.+)"/)?.[1]
+        || "status.pdf";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("PDF export error:", err);
+    } finally {
+      setPdfLoading(false);
+    }
+  }, [sceneNodes, stages, projectName, assemblyName]);
+
   if (sceneNodes.length === 0) return null;
 
   return (
     <div className="border-t border-gray-200 bg-white overflow-auto max-h-64">
+      <div className="sticky top-0 bg-gray-50 border-b border-gray-200 px-3 py-1.5 flex items-center justify-between">
+        <span className="text-[10px] text-gray-400 uppercase tracking-wide">
+          {sceneNodes.length} items
+        </span>
+        <div className="flex gap-1">
+          <button
+            onClick={handleExcelDownload}
+            className="px-2 py-0.5 text-[10px] text-gray-600 bg-white border border-gray-300 rounded hover:bg-gray-50"
+            title="Download as Excel"
+          >
+            Excel
+          </button>
+          <button
+            onClick={handlePdfDownload}
+            disabled={pdfLoading}
+            className="px-2 py-0.5 text-[10px] text-gray-600 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50"
+            title="Download as PDF"
+          >
+            {pdfLoading ? "..." : "PDF"}
+          </button>
+        </div>
+      </div>
       <table className="w-full text-xs">
-        <thead className="sticky top-0 bg-gray-50 border-b border-gray-200">
+        <thead className="sticky top-[29px] bg-gray-50 border-b border-gray-200">
           <tr>
             <th className="text-left px-3 py-1.5 font-medium text-gray-500">Name</th>
             <th className="text-left px-3 py-1.5 font-medium text-gray-500">Type</th>

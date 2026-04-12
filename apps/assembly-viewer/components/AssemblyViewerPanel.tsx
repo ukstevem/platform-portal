@@ -643,7 +643,12 @@ export function AssemblyViewerPanel() {
         </div>
         {/* Status table for current scene */}
         {tableNodes.length > 0 && (
-          <StageTable sceneNodes={tableNodes} stages={stages} />
+          <StageTable
+            sceneNodes={tableNodes}
+            stages={stages}
+            projectName={data?.projectName}
+            assemblyName={breadcrumb[breadcrumb.length - 1]?.name}
+          />
         )}
       </div>
 
