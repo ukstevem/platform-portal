@@ -85,7 +85,7 @@ export default function SettingsPage() {
     },
     {
       heading: "Charges & Thresholds",
-      keys: ["min_handling", "min_threshold"],
+      keys: ["min_handling", "handling_additional_sheet", "min_threshold"],
     },
     {
       heading: "Margins",
