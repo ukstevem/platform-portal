@@ -14,6 +14,7 @@ services:
       - scanner
       - laserquote
       - assembly-viewer
+      - nesting
 
   portal:
     image: ghcr.io/ukstevem/platform-portal/portal:latest
@@ -86,3 +87,13 @@ services:
       - APP_NAME=assembly-viewer
       - PORT=3007
       - DOC_SERVICE_URL=${DOC_SERVICE_URL:-http://10.0.0.75:80}
+
+  nesting:
+    image: ghcr.io/ukstevem/platform-portal/nesting:latest
+    container_name: platform_nesting
+    restart: unless-stopped
+    environment:
+      - APP_NAME=nesting
+      - PORT=3008
+      - NESTING_SERVICE_URL=${NESTING_SERVICE_URL:-http://10.0.0.74:8001}
+      - DOC_SERVICE_URL=${DOC_SERVICE_URL:-http://10.0.0.74:3000}

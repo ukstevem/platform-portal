@@ -152,6 +152,25 @@ services:
       - assembly_viewer_root_nm:/repo/node_modules
       - assembly_viewer_node_modules:/repo/apps/assembly-viewer/node_modules
 
+  nesting:
+    build:
+      context: .
+      dockerfile: docker/node/Dockerfile.dev
+    container_name: platform_nesting
+    working_dir: /repo
+    env_file: .env
+    environment:
+      WATCHPACK_POLLING: "true"
+      NESTING_SERVICE_URL: ${NESTING_SERVICE_URL:-http://10.0.0.74:8001}
+      DOC_SERVICE_URL: ${DOC_SERVICE_URL:-http://10.0.0.74:3000}
+    command:
+      ["sh", "-lc", "corepack enable && corepack prepare pnpm@9.15.0 --activate && pnpm install && pnpm -C apps/nesting dev --hostname 0.0.0.0 --port 3008"]
+    volumes:
+      - ./:/repo
+      - nesting_pnpm_store:/repo/.pnpm-store
+      - nesting_root_nm:/repo/node_modules
+      - nesting_node_modules:/repo/apps/nesting/node_modules
+
 volumes:
   portal_pnpm_store:
   portal_root_nm:
@@ -177,3 +196,6 @@ volumes:
   assembly_viewer_pnpm_store:
   assembly_viewer_root_nm:
   assembly_viewer_node_modules:
+  nesting_pnpm_store:
+  nesting_root_nm:
+  nesting_node_modules:

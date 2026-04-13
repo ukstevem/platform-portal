@@ -40,6 +40,11 @@ const apps = [
     href: "/assembly/",
     description: "View 3D assembly models with interactive tree navigation and STL preview.",
   },
+  {
+    name: "Beam Nesting",
+    href: "/nesting/",
+    description: "Optimise beam cutting layouts to minimise waste from stock lengths.",
+  },
 ];
 
 export default function PortalHome() {
