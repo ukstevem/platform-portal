@@ -44,9 +44,17 @@ function buildRows(sceneNodes: TreeNode[], stages: Map<string, StageInfo>) {
 
 export function StageTable({ sceneNodes, stages, projectName = "", assemblyName = "", drawingUrls, onRowClick, onRowRightClick, selectedNodeId }: StageTableProps) {
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [stageFilter, setStageFilter] = useState<string | null>(null); // null = show all, "none" = untagged, or a stage key
+
+  const filteredNodes = sceneNodes.filter((node) => {
+    if (stageFilter === null) return true;
+    const info = stages.get(node.id);
+    if (stageFilter === "none") return !info;
+    return info?.stage === stageFilter;
+  });
 
   const handleExcelDownload = useCallback(() => {
-    const rows = buildRows(sceneNodes, stages);
+    const rows = buildRows(filteredNodes, stages);
     const ws = XLSX.utils.json_to_sheet(rows.map((r) => ({
       Name: r.name,
       Type: r.type,
@@ -61,7 +69,7 @@ export function StageTable({ sceneNodes, stages, projectName = "", assemblyName 
   }, [sceneNodes, stages, projectName, assemblyName]);
 
   const handlePdfDownload = useCallback(async () => {
-    const rows = buildRows(sceneNodes, stages);
+    const rows = buildRows(filteredNodes, stages);
     setPdfLoading(true);
     try {
       const res = await fetch("/assembly/api/export-pdf/", {
@@ -92,10 +100,35 @@ export function StageTable({ sceneNodes, stages, projectName = "", assemblyName 
 
   return (
     <div className="border-t border-gray-200 bg-white overflow-auto max-h-64">
-      <div className="sticky top-0 bg-gray-50 border-b border-gray-200 px-3 py-1.5 flex items-center justify-between">
-        <span className="text-[10px] text-gray-400 uppercase tracking-wide">
-          {sceneNodes.length} items
-        </span>
+      <div className="sticky top-0 bg-gray-50 border-b border-gray-200 px-3 py-1.5 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1 flex-wrap">
+          <button
+            className={`px-1.5 py-0.5 text-[10px] rounded ${stageFilter === null ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-600 hover:bg-gray-300"}`}
+            onClick={() => setStageFilter(null)}
+          >
+            All ({sceneNodes.length})
+          </button>
+          <button
+            className={`px-1.5 py-0.5 text-[10px] rounded ${stageFilter === "none" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-600 hover:bg-gray-300"}`}
+            onClick={() => setStageFilter(stageFilter === "none" ? null : "none")}
+          >
+            Untagged ({sceneNodes.filter((n) => !stages.get(n.id)).length})
+          </button>
+          {PRODUCTION_STAGES.map((s) => {
+            const count = sceneNodes.filter((n) => stages.get(n.id)?.stage === s.key).length;
+            if (count === 0) return null;
+            return (
+              <button
+                key={s.key}
+                className={`px-1.5 py-0.5 text-[10px] rounded inline-flex items-center gap-1 ${stageFilter === s.key ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-600 hover:bg-gray-300"}`}
+                onClick={() => setStageFilter(stageFilter === s.key ? null : s.key)}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${stageFilter === s.key ? "bg-white" : s.dotClass}`} />
+                {s.label} ({count})
+              </button>
+            );
+          })}
+        </div>
         <div className="flex gap-1">
           <button
             onClick={handleExcelDownload}
@@ -125,7 +158,12 @@ export function StageTable({ sceneNodes, stages, projectName = "", assemblyName 
           </tr>
         </thead>
         <tbody>
-          {sceneNodes.map((node) => {
+          {sceneNodes.filter((node) => {
+            if (stageFilter === null) return true;
+            const info = stages.get(node.id);
+            if (stageFilter === "none") return !info;
+            return info?.stage === stageFilter;
+          }).map((node) => {
             const info = stages.get(node.id);
             return (
               <tr

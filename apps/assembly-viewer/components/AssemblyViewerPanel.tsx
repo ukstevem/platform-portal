@@ -132,12 +132,20 @@ export function AssemblyViewerPanel() {
   }, []);
 
   /** Apply stage colors to all meshes in the current scene */
-  const applyStageColors = useCallback(() => {
+  const applyStageColors = useCallback((stageMap: Map<string, StageInfo>) => {
     if (!viewerRef.current) return;
+    const meshCount = meshMapRef.current.size;
+    const stageCount = stageMap.size;
+    let applied = 0;
     for (const [nid, idx] of meshMapRef.current) {
-      viewerRef.current.setMeshColor(idx, getNodeColor(nid), 1.0);
+      const info = stageMap.get(nid);
+      if (info) {
+        viewerRef.current.setMeshColor(idx, STAGE_MESH_COLORS[info.stage], 1.0);
+        applied++;
+      }
     }
-  }, [getNodeColor]);
+    console.log(`[applyStageColors] meshes=${meshCount}, stages=${stageCount}, applied=${applied}`);
+  }, []);
 
   useEffect(() => {
     fetch("/assembly/api/assembly-data/")
@@ -156,10 +164,10 @@ export function AssemblyViewerPanel() {
       });
   }, []);
 
-  // Re-apply stage colors when stages change (e.g. after initial load from DB)
+  // Re-apply stage colors whenever stages OR the scene meshes change
   useEffect(() => {
-    applyStageColors();
-  }, [stages, applyStageColors]);
+    applyStageColors(stages);
+  }, [stages, sceneMeshIds, applyStageColors]);
 
   const loadNodeChildren = useCallback(
     async (node: TreeNode, stlMap: Record<string, string>, limit: number) => {
