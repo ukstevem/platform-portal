@@ -68,6 +68,10 @@ export function RefileDialog({
   const [supplierEmployees, setSupplierEmployees] = useState<SupplierEmployee[]>([]);
   const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<number[]>([]);
 
+  // Quick-add employee
+  const [newEmployeeName, setNewEmployeeName] = useState("");
+  const [addingEmployee, setAddingEmployee] = useState(false);
+
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -170,6 +174,32 @@ export function RefileDialog({
     );
   };
 
+  const handleAddEmployee = async () => {
+    if (!newEmployeeName.trim() || !supplierId) return;
+    setAddingEmployee(true);
+    const { data, error: err } = await supabase
+      .from("supplier_employee")
+      .insert({
+        supplier_id: supplierId,
+        employee_name: newEmployeeName.trim(),
+      })
+      .select("id, employee_name")
+      .single();
+
+    if (err) {
+      setError(`Failed to add employee: ${err.message}`);
+      setAddingEmployee(false);
+      return;
+    }
+
+    if (data) {
+      setSupplierEmployees((prev) => [...prev, data].sort((a, b) => a.employee_name.localeCompare(b.employee_name)));
+      setSelectedEmployeeIds((prev) => [...prev, data.id]);
+    }
+    setNewEmployeeName("");
+    setAddingEmployee(false);
+  };
+
   const handleSubmit = async () => {
     setError(null);
     setSubmitting(true);
@@ -199,14 +229,21 @@ export function RefileDialog({
         return;
       }
 
-      // Update supplier_employee induction records
+      // Update supplier_employee induction records with 12-month expiry
       if (selectedEmployeeIds.length > 0) {
+        const today = new Date();
+        const inductionDate = today.toISOString().split("T")[0];
+        const expiry = new Date(today);
+        expiry.setFullYear(expiry.getFullYear() + 1);
+        const inductionExpiry = expiry.toISOString().split("T")[0];
+
         for (const empId of selectedEmployeeIds) {
           await supabase
             .from("supplier_employee")
             .update({
-              induction_date: new Date().toISOString().split("T")[0],
+              induction_date: inductionDate,
               induction_scan_id: jobId,
+              induction_expiry: inductionExpiry,
             })
             .eq("id", empId);
         }
@@ -374,10 +411,8 @@ export function RefileDialog({
                       </span>
                     )}
                   </label>
-                  {supplierEmployees.length === 0 ? (
-                    <p className="text-sm text-gray-400 italic">No employees registered for this supplier</p>
-                  ) : (
-                    <div className="border rounded max-h-40 overflow-y-auto">
+                  {supplierEmployees.length > 0 && (
+                    <div className="border rounded max-h-40 overflow-y-auto mb-2">
                       {supplierEmployees.map((emp) => (
                         <label
                           key={emp.id}
@@ -396,6 +431,28 @@ export function RefileDialog({
                       ))}
                     </div>
                   )}
+                  {supplierEmployees.length === 0 && (
+                    <p className="text-sm text-gray-400 italic mb-2">No employees registered for this supplier — add below</p>
+                  )}
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newEmployeeName}
+                      onChange={(e) => setNewEmployeeName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddEmployee(); } }}
+                      placeholder="Employee name"
+                      className="flex-1 border rounded px-2 py-1.5 text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddEmployee}
+                      disabled={addingEmployee || !newEmployeeName.trim()}
+                      className="px-3 py-1.5 text-xs text-white rounded disabled:opacity-50 hover:opacity-90"
+                      style={{ backgroundColor: "var(--pss-navy)" }}
+                    >
+                      {addingEmployee ? "Adding..." : "+ Add"}
+                    </button>
+                  </div>
                 </div>
               );
             }
