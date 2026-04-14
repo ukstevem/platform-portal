@@ -738,6 +738,18 @@ export function AssemblyViewerPanel() {
             onRowClick={handleTableRowClick}
             onRowRightClick={handleNodeRightClick}
             selectedNodeId={highlightedNodeId}
+            onFilterChange={(filter) => {
+              if (!viewerRef.current) return;
+              for (const [nid, idx] of meshMapRef.current) {
+                if (filter === null) {
+                  viewerRef.current.setMeshVisible(idx, true);
+                } else if (filter === "none") {
+                  viewerRef.current.setMeshVisible(idx, !stages.get(nid));
+                } else {
+                  viewerRef.current.setMeshVisible(idx, stages.get(nid)?.stage === filter);
+                }
+              }
+            }}
           />
         )}
       </div>

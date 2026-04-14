@@ -15,6 +15,7 @@ interface StageTableProps {
   onRowClick?: (nodeId: string) => void;
   onRowRightClick?: (nodeId: string, pos: { clientX: number; clientY: number }) => void;
   selectedNodeId?: string | null;
+  onFilterChange?: (filter: string | null) => void;
 }
 
 function formatDate(iso: string): string {
@@ -42,9 +43,14 @@ function buildRows(sceneNodes: TreeNode[], stages: Map<string, StageInfo>) {
   });
 }
 
-export function StageTable({ sceneNodes, stages, projectName = "", assemblyName = "", drawingUrls, onRowClick, onRowRightClick, selectedNodeId }: StageTableProps) {
+export function StageTable({ sceneNodes, stages, projectName = "", assemblyName = "", drawingUrls, onRowClick, onRowRightClick, selectedNodeId, onFilterChange }: StageTableProps) {
   const [pdfLoading, setPdfLoading] = useState(false);
-  const [stageFilter, setStageFilter] = useState<string | null>(null); // null = show all, "none" = untagged, or a stage key
+  const [stageFilter, setStageFilter] = useState<string | null>(null);
+
+  const updateFilter = (f: string | null) => {
+    setStageFilter(f);
+    onFilterChange?.(f);
+  };
 
   const filteredNodes = sceneNodes.filter((node) => {
     if (stageFilter === null) return true;
@@ -104,13 +110,13 @@ export function StageTable({ sceneNodes, stages, projectName = "", assemblyName 
         <div className="flex items-center gap-1 flex-wrap">
           <button
             className={`px-1.5 py-0.5 text-[10px] rounded ${stageFilter === null ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-600 hover:bg-gray-300"}`}
-            onClick={() => setStageFilter(null)}
+            onClick={() => updateFilter(null)}
           >
             All ({sceneNodes.length})
           </button>
           <button
             className={`px-1.5 py-0.5 text-[10px] rounded ${stageFilter === "none" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-600 hover:bg-gray-300"}`}
-            onClick={() => setStageFilter(stageFilter === "none" ? null : "none")}
+            onClick={() => updateFilter(stageFilter === "none" ? null : "none")}
           >
             Untagged ({sceneNodes.filter((n) => !stages.get(n.id)).length})
           </button>
@@ -121,7 +127,7 @@ export function StageTable({ sceneNodes, stages, projectName = "", assemblyName 
               <button
                 key={s.key}
                 className={`px-1.5 py-0.5 text-[10px] rounded inline-flex items-center gap-1 ${stageFilter === s.key ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-600 hover:bg-gray-300"}`}
-                onClick={() => setStageFilter(stageFilter === s.key ? null : s.key)}
+                onClick={() => updateFilter(stageFilter === s.key ? null : s.key)}
               >
                 <span className={`w-1.5 h-1.5 rounded-full ${stageFilter === s.key ? "bg-white" : s.dotClass}`} />
                 {s.label} ({count})

@@ -16,6 +16,7 @@ export interface SceneItem {
 export interface STLViewerHandle {
   loadScene: (items: SceneItem[]) => Promise<void>;
   setMeshColor: (index: number, color: number, opacity?: number) => void;
+  setMeshVisible: (index: number, visible: boolean) => void;
   setClipPlane: (axis: "x" | "y" | "z", position: number, enabled: boolean) => void;
   getSceneBounds: () => { min: [number, number, number]; max: [number, number, number] } | null;
   dispose: () => void;
@@ -377,6 +378,15 @@ export const STLViewerComponent = forwardRef<STLViewerHandle, STLViewerProps>(
           entry.edgesMat.opacity = Math.min(opacity + 0.1, 1.0);
           entry.edgesMat.needsUpdate = true;
         }
+      },
+
+      setMeshVisible(index: number, visible: boolean) {
+        const s = stateRef.current;
+        if (!s) return;
+        const entry = s.meshes[index];
+        if (!entry) return;
+        entry.mesh.visible = visible;
+        entry.edges.visible = visible;
       },
 
       setClipPlane(axis: "x" | "y" | "z", position: number, enabled: boolean) {
