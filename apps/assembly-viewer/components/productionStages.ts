@@ -39,3 +39,8 @@ export const STAGE_MESH_COLORS: Record<ProductionStage, number> = Object.fromEnt
 export const STAGE_LABELS: Record<ProductionStage, string> = Object.fromEntries(
   PRODUCTION_STAGES.map((s) => [s.key, s.label])
 ) as Record<ProductionStage, string>;
+
+/** Progress order — lower = less progressed */
+export const STAGE_ORDER: Record<ProductionStage, number> = Object.fromEntries(
+  PRODUCTION_STAGES.map((s, i) => [s.key, i])
+) as Record<ProductionStage, number>;

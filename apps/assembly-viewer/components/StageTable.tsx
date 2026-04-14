@@ -14,6 +14,7 @@ interface StageTableProps {
   drawingUrls?: Map<string, string>;
   onRowClick?: (nodeId: string) => void;
   onRowRightClick?: (nodeId: string, pos: { clientX: number; clientY: number }) => void;
+  onRowHover?: (nodeId: string | null) => void;
   selectedNodeId?: string | null;
   onFilterChange?: (filter: string | null) => void;
 }
@@ -43,7 +44,7 @@ function buildRows(sceneNodes: TreeNode[], stages: Map<string, StageInfo>) {
   });
 }
 
-export function StageTable({ sceneNodes, stages, projectName = "", assemblyName = "", drawingUrls, onRowClick, onRowRightClick, selectedNodeId, onFilterChange }: StageTableProps) {
+export function StageTable({ sceneNodes, stages, projectName = "", assemblyName = "", drawingUrls, onRowClick, onRowRightClick, onRowHover, selectedNodeId, onFilterChange }: StageTableProps) {
   const [pdfLoading, setPdfLoading] = useState(false);
   const [stageFilter, setStageFilter] = useState<string | null>(null);
 
@@ -176,6 +177,8 @@ export function StageTable({ sceneNodes, stages, projectName = "", assemblyName 
                 key={node.id}
                 className={`border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${selectedNodeId === node.id ? "bg-blue-50" : ""}`}
                 onClick={() => onRowClick?.(node.id)}
+                onMouseEnter={() => onRowHover?.(node.id)}
+                onMouseLeave={() => onRowHover?.(null)}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   onRowRightClick?.(node.id, { clientX: e.clientX, clientY: e.clientY });

@@ -115,9 +115,18 @@ export function AssemblyViewerPanel() {
   const [drawingUrls, setDrawingUrls] = useState<Map<string, string>>(new Map());
 
   const viewerRef = useRef<STLViewerHandle>(null);
+  // Persistent mesh map — nodeId → meshIndex, survives navigation, only grows
+  const globalMeshMapRef = useRef<Map<string, number>>(new Map());
+  // Which assemblies have been exploded (blob hidden, children shown)
+  const explodedNodesRef = useRef<Set<string>>(new Set());
+  // Current level: nodeId → meshIndex for hover/highlight
   const meshMapRef = useRef<Map<string, number>>(new Map());
+  // Click target: meshIndex → nodeId to use for handleSelect (may differ from mesh's own nodeId)
+  const clickTargetRef = useRef<Map<number, string>>(new Map());
   const sceneNodesRef = useRef<TreeNode[]>([]);
   const [tableNodes, setTableNodes] = useState<TreeNode[]>([]);
+  // Track if initial scene has been loaded (establishes scene center)
+  const sceneInitializedRef = useRef(false);
 
   // Production stage persistence
   const { stages, setStage, setStageBulk, clearStage } = useNodeStages(data?.runId ?? null);
@@ -131,20 +140,16 @@ export function AssemblyViewerPanel() {
     return info ? STAGE_MESH_COLORS[info.stage] : DEFAULT_COLOR;
   }, []);
 
-  /** Apply stage colors to all meshes in the current scene */
+  /** Apply stage colors to all visible meshes in the scene */
   const applyStageColors = useCallback((stageMap: Map<string, StageInfo>) => {
     if (!viewerRef.current) return;
-    const meshCount = meshMapRef.current.size;
-    const stageCount = stageMap.size;
-    let applied = 0;
-    for (const [nid, idx] of meshMapRef.current) {
+    // Color every mesh that has been loaded (not just current level)
+    for (const [nid, idx] of globalMeshMapRef.current) {
       const info = stageMap.get(nid);
       if (info) {
         viewerRef.current.setMeshColor(idx, STAGE_MESH_COLORS[info.stage], 1.0);
-        applied++;
       }
     }
-    console.log(`[applyStageColors] meshes=${meshCount}, stages=${stageCount}, applied=${applied}`);
   }, []);
 
   useEffect(() => {
@@ -169,61 +174,239 @@ export function AssemblyViewerPanel() {
     applyStageColors(stages);
   }, [stages, sceneMeshIds, applyStageColors]);
 
-  const loadNodeChildren = useCallback(
-    async (node: TreeNode, stlMap: Record<string, string>, limit: number) => {
-      if (!viewerRef.current) return;
+  /** Multiply two 4x4 column-major matrices */
+  const multiplyMatrices = (a: number[], b: number[]): number[] => {
+    const out = new Array(16);
+    for (let col = 0; col < 4; col++) {
+      for (let row = 0; row < 4; row++) {
+        out[col * 4 + row] =
+          a[0 * 4 + row] * b[col * 4 + 0] +
+          a[1 * 4 + row] * b[col * 4 + 1] +
+          a[2 * 4 + row] * b[col * 4 + 2] +
+          a[3 * 4 + row] * b[col * 4 + 3];
+      }
+    }
+    return out;
+  };
+
+  /**
+   * Explode a node: hide its blob, load its children with composed placement.
+   * Does NOT change visibility of other meshes.
+   */
+  const explodeNode = useCallback(
+    async (node: TreeNode, stlMap: Record<string, string>) => {
+      if (!viewerRef.current || explodedNodesRef.current.has(node.id)) return;
 
       const children = (node.children || []).filter((c) => stlMap[c.id]);
       if (children.length === 0) return;
 
-      const loadList = children.length > limit ? children.slice(0, limit) : children;
-      const truncated = children.length > limit;
+      // Hide the parent blob
+      const parentIdx = globalMeshMapRef.current.get(node.id);
+      if (parentIdx !== undefined) {
+        viewerRef.current.setMeshVisible(parentIdx, false);
+      }
+      explodedNodesRef.current.add(node.id);
 
-      setViewerStatus(`Loading ${loadList.length}${truncated ? ` of ${children.length}` : ""} parts...`);
+      // Figure out which children need loading
+      const toLoad = children.filter((c) => globalMeshMapRef.current.get(c.id) === undefined);
 
-      const newMeshMap = new Map<string, number>();
-      const items: SceneItem[] = loadList.map((child, i) => {
-        newMeshMap.set(child.id, i);
-        const stlPath = stlMap[child.id];
-        const url = stlPath.replace(/^\/outputs\/stl\//, "/assembly/api/stl/");
-        return {
-          url,
-          color: DEFAULT_COLOR,
-          opacity: 1.0,
-          label: child.name,
-          placement: child.placement,
-        };
-      });
+      if (toLoad.length > 0) {
+        const items: SceneItem[] = toLoad.map((child) => {
+          const stlPath = stlMap[child.id];
+          const url = stlPath.replace(/^\/outputs\/stl\//, "/assembly/api/stl/");
 
-      meshMapRef.current = newMeshMap;
-      sceneNodesRef.current = loadList;
-      setTableNodes(loadList);
-      setSceneMeshIds(new Set(newMeshMap.keys()));
-      setHighlightedNodeId(null);
-
-      try {
-        await viewerRef.current.loadScene(items);
-        // Apply stage colors after scene loads
-        for (const [nid, idx] of newMeshMap) {
-          const info = stagesRef.current.get(nid);
-          if (info) {
-            viewerRef.current.setMeshColor(idx, STAGE_MESH_COLORS[info.stage], 1.0);
+          // Compose parent × child placement for correct world position
+          let placement = child.placement;
+          if (node.placement && node.placement.length === 16) {
+            if (child.placement && child.placement.length === 16) {
+              placement = multiplyMatrices(node.placement, child.placement);
+            } else {
+              placement = node.placement;
+            }
           }
+
+          return { url, color: DEFAULT_COLOR, opacity: 1.0, label: child.name, placement };
+        });
+
+        if (!sceneInitializedRef.current) {
+          await viewerRef.current.loadScene(items);
+          sceneInitializedRef.current = true;
+          toLoad.forEach((child, i) => globalMeshMapRef.current.set(child.id, i));
+        } else {
+          const startIdx = await viewerRef.current.addMeshes(items);
+          toLoad.forEach((child, i) => globalMeshMapRef.current.set(child.id, startIdx + i));
         }
-        setViewerStatus(
-          `${node.name} — ${loadList.length} parts${truncated ? ` (showing ${limit} of ${children.length})` : ""}`
-        );
-        const bounds = viewerRef.current.getSceneBounds();
-        if (bounds) {
-          const axisIdx = { x: 0, y: 1, z: 2 }[clipAxis];
-          setClipBounds({ min: bounds.min[axisIdx], max: bounds.max[axisIdx] });
-          setClipPosition(bounds.max[axisIdx]);
-        }
-      } catch {
-        setViewerStatus("Failed to load some parts");
       }
     },
-    [clipAxis]
+    []
+  );
+
+  /**
+   * Recursively collect all visible leaf mesh indices under a node,
+   * following explosions. Returns [meshIndex, leafNodeId] pairs.
+   */
+  const collectLeafMeshes = useCallback(
+    (node: TreeNode, stlMap: Record<string, string>): Array<[number, string]> => {
+      const result: Array<[number, string]> = [];
+      const children = (node.children || []).filter((c) => stlMap[c.id]);
+      for (const child of children) {
+        if (explodedNodesRef.current.has(child.id)) {
+          // Recursively collect from exploded children
+          result.push(...collectLeafMeshes(child, stlMap));
+        } else {
+          const idx = globalMeshMapRef.current.get(child.id);
+          if (idx !== undefined) result.push([idx, child.id]);
+        }
+      }
+      return result;
+    },
+    []
+  );
+
+  /**
+   * Show a level: hide everything, then show the correct meshes for this
+   * parent's children (respecting explosions). Build click targets.
+   */
+  const showLevel = useCallback(
+    async (parentNode: TreeNode, stlMap: Record<string, string>) => {
+      if (!viewerRef.current) return;
+
+      const children = (parentNode.children || []).filter((c) => stlMap[c.id]);
+      if (children.length === 0) return;
+
+      const MAX_PARTS = 500;
+      const loadList = children.length > MAX_PARTS ? children.slice(0, MAX_PARTS) : children;
+      const truncated = children.length > MAX_PARTS;
+
+      // Hide everything first
+      viewerRef.current.hideAll();
+
+      // Load blobs for any non-exploded children that aren't in the scene yet
+      const toLoad = loadList.filter(
+        (c) => !explodedNodesRef.current.has(c.id) && globalMeshMapRef.current.get(c.id) === undefined
+      );
+
+      if (toLoad.length > 0) {
+        setViewerStatus(`Loading ${toLoad.length} parts...`);
+        const items: SceneItem[] = toLoad.map((child) => {
+          const stlPath = stlMap[child.id];
+          const url = stlPath.replace(/^\/outputs\/stl\//, "/assembly/api/stl/");
+          return { url, color: DEFAULT_COLOR, opacity: 1.0, label: child.name, placement: child.placement };
+        });
+
+        if (!sceneInitializedRef.current) {
+          await viewerRef.current.loadScene(items);
+          sceneInitializedRef.current = true;
+          toLoad.forEach((child, i) => globalMeshMapRef.current.set(child.id, i));
+        } else {
+          const startIdx = await viewerRef.current.addMeshes(items);
+          toLoad.forEach((child, i) => globalMeshMapRef.current.set(child.id, startIdx + i));
+        }
+      }
+
+      // Recursively auto-explode assemblies with mixed descendant stages
+      // Keeps going until every visible node is either a leaf, a uniform blob, or fully exploded
+      const stageMap = stagesRef.current;
+
+      const autoExplode = async (nodes: TreeNode[]) => {
+        for (const child of nodes) {
+          if (explodedNodesRef.current.has(child.id)) continue;
+          if (!child.children || child.children.length === 0) continue;
+          if (!child.children.some((c) => stlMap[c.id])) continue;
+
+          const descendants = collectDescendantIds(child);
+          let firstStage: string | null | undefined = undefined;
+          let mixed = false;
+          for (const did of descendants) {
+            const s = stageMap.get(did)?.stage ?? null;
+            if (firstStage === undefined) {
+              firstStage = s;
+            } else if (s !== firstStage) {
+              mixed = true;
+              break;
+            }
+          }
+
+          if (mixed) {
+            await explodeNode(child, stlMap);
+            // Recurse into the newly loaded children
+            const subChildren = child.children.filter((c) => stlMap[c.id]);
+            await autoExplode(subChildren);
+          }
+        }
+      };
+
+      await autoExplode(loadList);
+
+      // Build visibility and interaction maps
+      const visibleIndices: number[] = [];
+      const visibleMeshMap = new Map<string, number>();
+      const newClickTarget = new Map<number, string>();
+
+      for (const child of loadList) {
+        if (explodedNodesRef.current.has(child.id)) {
+          // Exploded: show leaf meshes, click targets point to this assembly
+          const leaves = collectLeafMeshes(child, stlMap);
+          for (const [meshIdx, leafId] of leaves) {
+            visibleIndices.push(meshIdx);
+            newClickTarget.set(meshIdx, child.id);
+            const info = stageMap.get(leafId);
+            if (info) {
+              viewerRef.current.setMeshColor(meshIdx, STAGE_MESH_COLORS[info.stage], 1.0);
+            } else {
+              viewerRef.current.setMeshColor(meshIdx, DEFAULT_COLOR, 1.0);
+            }
+          }
+          if (leaves.length > 0) {
+            visibleMeshMap.set(child.id, leaves[0][0]);
+          }
+        } else {
+          // Blob (uniform or untagged) or leaf part
+          const idx = globalMeshMapRef.current.get(child.id);
+          if (idx === undefined) continue;
+
+          visibleIndices.push(idx);
+          visibleMeshMap.set(child.id, idx);
+          newClickTarget.set(idx, child.id);
+
+          // Color: own stage, or uniform descendant stage, or default
+          const info = stageMap.get(child.id);
+          if (info) {
+            viewerRef.current.setMeshColor(idx, STAGE_MESH_COLORS[info.stage], 1.0);
+          } else if (child.children && child.children.length > 0) {
+            // Uniform — all descendants have the same stage (checked above, not mixed)
+            const descendants = collectDescendantIds(child);
+            let uniformStage: ProductionStage | null = null;
+            for (const did of descendants) {
+              const dInfo = stageMap.get(did);
+              if (dInfo) { uniformStage = dInfo.stage; break; }
+            }
+            if (uniformStage) {
+              viewerRef.current.setMeshColor(idx, STAGE_MESH_COLORS[uniformStage], 1.0);
+            } else {
+              viewerRef.current.setMeshColor(idx, DEFAULT_COLOR, 1.0);
+            }
+          } else {
+            viewerRef.current.setMeshColor(idx, DEFAULT_COLOR, 1.0);
+          }
+        }
+      }
+
+      viewerRef.current.showByIndices(visibleIndices);
+      viewerRef.current.fitToVisible();
+
+      meshMapRef.current = visibleMeshMap;
+      clickTargetRef.current = newClickTarget;
+      sceneNodesRef.current = loadList;
+      setTableNodes(loadList);
+      setSceneMeshIds(new Set(visibleMeshMap.keys()));
+      setHighlightedNodeId(null);
+
+      setViewerStatus(
+        `${parentNode.name} — ${loadList.length} parts${truncated ? ` (first ${MAX_PARTS} of ${children.length})` : ""}`
+      );
+    },
+    [collectLeafMeshes]
   );
 
   const handleSelect = useCallback(
@@ -238,67 +421,61 @@ export function AssemblyViewerPanel() {
       const isMultiSolid = node.node_type === "part_multi_solid";
 
       if ((isAssembly || isMultiSolid) && canDrillInto(node, data.stl_map)) {
+        // Explode this node if not already (loads its children into the scene)
+        await explodeNode(node, data.stl_map);
         setBreadcrumb(buildPath(data.assembly_tree, nodeId));
-        await loadNodeChildren(node, data.stl_map, 500);
+        // Show this level (hides everything else, shows this node's children)
+        await showLevel(node, data.stl_map);
         return;
       }
 
-      const stlPath = data.stl_map[nodeId];
-      if (stlPath && viewerRef.current) {
-        setViewerStatus(`Loading ${node.name}...`);
-        const url = stlPath.replace(/^\/outputs\/stl\//, "/assembly/api/stl/");
-        meshMapRef.current = new Map([[nodeId, 0]]);
-        sceneNodesRef.current = [node];
-        setTableNodes([node]);
-        setSceneMeshIds(new Set([nodeId]));
-        setHighlightedNodeId(null);
-        setBreadcrumb(buildPath(data.assembly_tree, nodeId));
-
-        try {
-          await viewerRef.current.loadScene([
-            { url, color: getNodeColor(nodeId), opacity: 1.0, label: node.name },
-          ]);
-          setViewerStatus(node.name);
-        } catch {
-          setViewerStatus("Failed to load STL");
+      // Leaf part — highlight it, don't change the view
+      const meshIdx = meshMapRef.current.get(nodeId);
+      if (meshIdx !== undefined && viewerRef.current) {
+        setHighlightedNodeId(nodeId);
+        for (const [nid, idx] of meshMapRef.current) {
+          if (nid === nodeId) {
+            viewerRef.current.setMeshColor(idx, HIGHLIGHT_COLOR, 1.0);
+          } else {
+            viewerRef.current.setMeshColor(idx, DIM_COLOR, DIM_OPACITY);
+          }
         }
       }
     },
-    [data, loadNodeChildren, getNodeColor]
+    [data, explodeNode, showLevel]
   );
 
   const handleMeshClick = useCallback(
     (meshIndex: number) => {
       if (!data || !viewerRef.current) return;
       setContextMenu(null);
-      const meshMap = meshMapRef.current;
 
-      let clickedNodeId: string | null = null;
-      for (const [nid, idx] of meshMap) {
-        if (idx === meshIndex) { clickedNodeId = nid; break; }
-      }
-      if (!clickedNodeId) return;
+      // Use click target map to find the correct node for this mesh
+      const targetNodeId = clickTargetRef.current.get(meshIndex);
+      if (!targetNodeId) return;
 
-      const node = findNode(data.assembly_tree, clickedNodeId);
+      const node = findNode(data.assembly_tree, targetNodeId);
       if (!node) return;
 
       if (canDrillInto(node, data.stl_map)) {
-        handleSelect(clickedNodeId);
+        handleSelect(targetNodeId);
         return;
       }
 
-      setHighlightedNodeId(clickedNodeId);
+      // Leaf part — highlight
+      setHighlightedNodeId(targetNodeId);
+      setSelectedNodeId(targetNodeId);
+      const meshMap = meshMapRef.current;
       for (const [nid, idx] of meshMap) {
-        if (nid === clickedNodeId) {
+        if (nid === targetNodeId) {
           viewerRef.current.setMeshColor(idx, HIGHLIGHT_COLOR, 1.0);
         } else {
           viewerRef.current.setMeshColor(idx, DIM_COLOR, DIM_OPACITY);
         }
       }
 
-      setSelectedNodeId(clickedNodeId);
       requestAnimationFrame(() => {
-        const el = document.querySelector(`[data-node-id="${clickedNodeId}"]`);
+        const el = document.querySelector(`[data-node-id="${targetNodeId}"]`);
         if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
       });
     },
@@ -308,11 +485,7 @@ export function AssemblyViewerPanel() {
   // Right-click on mesh in 3D → open stage context menu
   const handleMeshRightClick = useCallback(
     (meshIndex: number, pos: { clientX: number; clientY: number }) => {
-      const meshMap = meshMapRef.current;
-      let nodeId: string | null = null;
-      for (const [nid, idx] of meshMap) {
-        if (idx === meshIndex) { nodeId = nid; break; }
-      }
+      const nodeId = clickTargetRef.current.get(meshIndex);
       if (nodeId) setContextMenu({ x: pos.clientX, y: pos.clientY, nodeId });
     },
     []
@@ -736,6 +909,7 @@ export function AssemblyViewerPanel() {
             assemblyName={breadcrumb[breadcrumb.length - 1]?.name}
             drawingUrls={drawingUrls}
             onRowClick={handleTableRowClick}
+            onRowHover={handleHover}
             onRowRightClick={handleNodeRightClick}
             selectedNodeId={highlightedNodeId}
             onFilterChange={(filter) => {

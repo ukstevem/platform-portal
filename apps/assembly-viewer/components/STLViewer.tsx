@@ -15,6 +15,14 @@ export interface SceneItem {
 
 export interface STLViewerHandle {
   loadScene: (items: SceneItem[]) => Promise<void>;
+  /** Add meshes to the existing scene without clearing. Returns the starting index. */
+  addMeshes: (items: SceneItem[]) => Promise<number>;
+  /** Hide all meshes in the scene */
+  hideAll: () => void;
+  /** Show meshes by their indices */
+  showByIndices: (indices: number[]) => void;
+  /** Zoom camera to fit only visible meshes */
+  fitToVisible: () => void;
   setMeshColor: (index: number, color: number, opacity?: number) => void;
   setMeshVisible: (index: number, visible: boolean) => void;
   setClipPlane: (axis: "x" | "y" | "z", position: number, enabled: boolean) => void;
@@ -361,6 +369,146 @@ export const STLViewerComponent = forwardRef<STLViewerHandle, STLViewerProps>(
         boundsBox.min.sub(center);
         boundsBox.max.sub(center);
         s.sceneBounds = boundsBox;
+      },
+
+      async addMeshes(items: SceneItem[]): Promise<number> {
+        const s = stateRef.current;
+        if (!s) return 0;
+
+        const startIndex = s.meshes.length;
+        const loader = new STLLoader();
+
+        const addOne = (geometry: THREE.BufferGeometry, item: SceneItem, index: number) => {
+          const color = item.color ?? DEFAULT_COLOR;
+          const opacity = item.opacity ?? 1.0;
+
+          const material = new THREE.MeshPhongMaterial({
+            color,
+            specular: 0x222222,
+            shininess: 40,
+            flatShading: false,
+            transparent: opacity < 1.0,
+            opacity,
+            clippingPlanes: s.clipEnabled ? [s.clipPlane] : [],
+            clipShadows: true,
+          });
+
+          const mesh = new THREE.Mesh(geometry, material);
+
+          if (item.placement && item.placement.length === 16) {
+            const m4 = new THREE.Matrix4();
+            m4.fromArray(item.placement);
+            mesh.applyMatrix4(m4);
+          }
+
+          // Apply the same center offset as the initial scene
+          mesh.position.sub(s.sceneCenter);
+
+          s.scene.add(mesh);
+
+          const edgesGeo = new THREE.EdgesGeometry(geometry, 15);
+          const edgesMat = new THREE.LineBasicMaterial({
+            color: 0x333333,
+            transparent: opacity < 1.0,
+            opacity: Math.min(opacity + 0.1, 1.0),
+            clippingPlanes: s.clipEnabled ? [s.clipPlane] : [],
+          });
+          const edges = new THREE.LineSegments(edgesGeo, edgesMat);
+          if (item.placement && item.placement.length === 16) {
+            const m4 = new THREE.Matrix4();
+            m4.fromArray(item.placement);
+            edges.applyMatrix4(m4);
+          }
+          edges.position.sub(s.sceneCenter);
+          s.scene.add(edges);
+
+          s.meshes[index] = { mesh, edges, material, edgesMat };
+        };
+
+        const loadOne = (item: SceneItem, index: number) =>
+          new Promise<void>((resolve, reject) => {
+            const cached = s.geometryCache.get(item.url);
+            if (cached) {
+              if (s.disposed) { reject(new Error("disposed")); return; }
+              addOne(cached, item, index);
+              resolve();
+              return;
+            }
+            loader.load(
+              item.url,
+              (geometry) => {
+                if (s.disposed) { reject(new Error("disposed")); return; }
+                geometry.computeVertexNormals();
+                s.geometryCache.set(item.url, geometry);
+                addOne(geometry, item, index);
+                resolve();
+              },
+              undefined,
+              (err) => reject(err)
+            );
+          });
+
+        const BATCH_SIZE = 20;
+        for (let b = 0; b < items.length; b += BATCH_SIZE) {
+          const batch = items.slice(b, b + BATCH_SIZE);
+          await Promise.all(batch.map((item, j) => loadOne(item, startIndex + b + j)));
+          if (s.disposed) return startIndex;
+        }
+
+        return startIndex;
+      },
+
+      hideAll() {
+        const s = stateRef.current;
+        if (!s) return;
+        for (const entry of s.meshes) {
+          if (!entry) continue;
+          entry.mesh.visible = false;
+          entry.edges.visible = false;
+        }
+      },
+
+      showByIndices(indices: number[]) {
+        const s = stateRef.current;
+        if (!s) return;
+        for (const idx of indices) {
+          const entry = s.meshes[idx];
+          if (!entry) continue;
+          entry.mesh.visible = true;
+          entry.edges.visible = true;
+        }
+      },
+
+      fitToVisible() {
+        const s = stateRef.current;
+        if (!s) return;
+
+        const box = new THREE.Box3();
+        let found = false;
+        for (const entry of s.meshes) {
+          if (!entry || !entry.mesh.visible) continue;
+          const meshBox = new THREE.Box3().setFromObject(entry.mesh);
+          box.union(meshBox);
+          found = true;
+        }
+        if (!found) return;
+
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        const center = new THREE.Vector3();
+        box.getCenter(center);
+        const maxDim = Math.max(size.x, size.y, size.z);
+
+        const fov = s.camera.fov * (Math.PI / 180);
+        const dist = (maxDim / 2) / Math.tan(fov / 2) * 1.5;
+
+        s.camera.position.set(center.x + dist * 0.7, center.y + dist * 0.5, center.z + dist);
+        s.camera.near = dist / 100;
+        s.camera.far = dist * 10;
+        s.camera.updateProjectionMatrix();
+
+        s.controls.target.copy(center);
+        s.controls.update();
       },
 
       setMeshColor(index: number, color: number, opacity = 1.0) {
