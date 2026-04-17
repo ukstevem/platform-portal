@@ -14,11 +14,13 @@ const apps = [
     name: "Document Control",
     href: "/documents/",
     description: "Upload, manage, and track engineering drawings and project documents.",
+    disabled: true,
   },
   {
     name: "Job Cards",
     href: "/jobcards/",
     description: "Create and manage job cards for workshop and site work.",
+    disabled: true,
   },
   {
     name: "Operations",
@@ -44,6 +46,11 @@ const apps = [
     name: "Beam Nesting",
     href: "/nesting/",
     description: "Optimise beam cutting layouts to minimise waste from stock lengths.",
+  },
+  {
+    name: "Material Certs",
+    href: "/matl-cert/",
+    description: "Track and trace material certificates against project deliverables.",
   },
 ];
 
@@ -109,21 +116,34 @@ export default function PortalHome() {
 
       {tab === "apps" && (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {apps.map((app) => (
-            <a
-              key={app.href}
-              href={app.href}
-              className="block border rounded-lg p-5 hover:shadow-md transition-shadow bg-white group"
-            >
-              <h2
-                className="text-lg font-semibold mb-2 group-hover:underline"
-                style={{ color: "var(--pss-navy)" }}
+          {apps.map((app) =>
+            app.disabled ? (
+              <div
+                key={app.href}
+                aria-disabled="true"
+                className="block border rounded-lg p-5 bg-gray-100 opacity-60 cursor-not-allowed select-none"
               >
-                {app.name}
-              </h2>
-              <p className="text-sm text-gray-500">{app.description}</p>
-            </a>
-          ))}
+                <h2 className="text-lg font-semibold mb-2 text-gray-400">
+                  {app.name}
+                </h2>
+                <p className="text-sm text-gray-400">{app.description}</p>
+              </div>
+            ) : (
+              <a
+                key={app.href}
+                href={app.href}
+                className="block border rounded-lg p-5 hover:shadow-md transition-shadow bg-white group"
+              >
+                <h2
+                  className="text-lg font-semibold mb-2 group-hover:underline"
+                  style={{ color: "var(--pss-navy)" }}
+                >
+                  {app.name}
+                </h2>
+                <p className="text-sm text-gray-500">{app.description}</p>
+              </a>
+            )
+          )}
         </div>
       )}
 
