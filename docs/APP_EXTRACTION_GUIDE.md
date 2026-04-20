@@ -3,27 +3,30 @@
 Playbook for moving an app out of the `platform-portal` monorepo into its own repo, using the same pattern that `matl-cert` proved.
 
 **Goals**
-1. Cut the monorepo rebuild cascade (one app's change no longer reinstalls the workspace for every other app).
-2. Allow any single app to be stopped, replaced, or rolled back without disrupting others.
+1. Allow any single app to be stopped, replaced, or rolled back without disrupting others.
+2. Isolate release cadence — an app with external dependencies (or a different stakeholder owning it) can ship on its own schedule.
 3. Keep a single public entry point (`gateway` on port 3000) — users see no change.
+
+**Note on build time:** The original thesis was that extraction would cut monorepo rebuild time. With the BuildKit cache mounts in `docker/node/Dockerfile.prod` (added 2026-04-20), the `pnpm install` tax has already been removed — an unchanged app now rebuilds in ~5s, and a single-app change costs ~100s (dominated by `next build` + `docker push`, both unavoidable per app regardless of location). **Extract for lifecycle isolation, not build speed.**
 
 ---
 
 ## 0. Pick the right candidate
 
-Run the timer **before** deciding:
+Build-speed ranking alone is no longer the deciding factor. Prefer apps that have:
+
+- An **independent release cadence** (matl-cert-style: different stakeholders, compliance-driven releases, external dependencies).
+- A **self-contained dependency footprint** — touches `packages/ui` / `packages/auth` / `packages/supabase` only lightly, so vendoring those bits causes minimal drift.
+- **Heavy external integration** (large backends, long-running jobs) that benefits from being redeployable without touching the rest of the platform.
+
+Bad candidates: apps that share components heavily with others (portal + jobcards). Keep those in the monorepo — the caching patch already gives them fast rebuilds.
+
+If you do want timing data anyway:
 
 ```bash
 ./scripts/deploy-timed.sh
 awk -F, 'NR>1{print $4, $3}' scripts/build-times.csv | sort -n -r | head -5
 ```
-
-Good extraction candidates:
-- Slowest to build, **and**
-- Touches `packages/ui` / `packages/auth` / `packages/supabase` only lightly, **and**
-- Has an independent release cadence (different stakeholders, different data).
-
-Bad candidates: apps that share components heavily with others (portal + jobcards). Refactor those in-place.
 
 ---
 
