@@ -43,6 +43,9 @@ function TimesheetsPageInner() {
   const [refreshKey, setRefreshKey] = useState(0);
   const onApprovalChange = () => setRefreshKey((k) => k + 1);
 
+  const currentMonday = getMonday(new Date());
+  const isCurrentOrFutureWeek = monday >= currentMonday;
+
   const prevWeek = () =>
     setMonday((m) => {
       const d = new Date(m);
@@ -54,6 +57,7 @@ function TimesheetsPageInner() {
     setMonday((m) => {
       const d = new Date(m);
       d.setDate(d.getDate() + 7);
+      if (d > currentMonday) return m; // prevent navigating to future weeks
       return d;
     });
 
@@ -84,7 +88,7 @@ function TimesheetsPageInner() {
       <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-6">
         <EmployeePicker selected={employee} onSelect={setEmployee} />
         <div className="sm:ml-auto">
-          <WeekNav monday={monday} onPrev={prevWeek} onNext={nextWeek} />
+          <WeekNav monday={monday} onPrev={prevWeek} onNext={nextWeek} disableNext={isCurrentOrFutureWeek} />
         </div>
       </div>
 

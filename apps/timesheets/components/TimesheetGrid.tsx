@@ -23,6 +23,7 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
   const { user } = useAuth();
   const weekDates = useMemo(() => getWeekDates(monday), [monday]);
   const weekISOs = useMemo(() => weekDates.map(toISO), [weekDates]);
+  const todayISO = useMemo(() => toISO(new Date()), []);
 
   const [rows, setRows] = useState<GridRow[]>([]);
   const [projectItems, setProjectItems] = useState<ProjectItem[]>([]);
@@ -248,6 +249,7 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
     dateISO: string,
     value: string
   ) => {
+    if (dateISO > todayISO) return; // prevent future date entry
     const num = value === "" ? 0 : parseFloat(value);
     if (isNaN(num) || num < 0 || num > 24) return;
 
@@ -584,10 +586,11 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
                   {weekISOs.map((iso) => {
                     const isOT = row.overtime[iso];
                     const hasHours = (row.hours[iso] ?? 0) > 0;
+                    const isFuture = iso > todayISO;
                     return (
                       <td
                         key={iso}
-                        className={`border px-0 py-0 relative group/cell ${isOT ? "bg-amber-100" : ""}`}
+                        className={`border px-0 py-0 relative group/cell ${isFuture ? "bg-gray-100" : isOT ? "bg-amber-100" : ""}`}
                       >
                         <input
                           type="number"
@@ -599,10 +602,11 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
                             handleHoursChange(rowIdx, iso, e.target.value)
                           }
                           onBlur={() => handleBlur(rowIdx, iso)}
-                          className={`w-full h-full px-2 py-1.5 text-center text-sm border-0 outline-none focus:bg-blue-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${isOT ? "bg-amber-100 text-amber-800 font-medium" : ""}`}
-                          placeholder="–"
+                          disabled={isFuture}
+                          className={`w-full h-full px-2 py-1.5 text-center text-sm border-0 outline-none focus:bg-blue-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${isFuture ? "bg-gray-100 text-gray-400 cursor-not-allowed" : isOT ? "bg-amber-100 text-amber-800 font-medium" : ""}`}
+                          placeholder={isFuture ? "" : "–"}
                         />
-                        {hasHours && (
+                        {hasHours && !isFuture && (
                           <button
                             type="button"
                             onClick={() => toggleOvertime(rowIdx, iso)}

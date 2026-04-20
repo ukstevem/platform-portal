@@ -6,9 +6,10 @@ type WeekNavProps = {
   monday: Date;
   onPrev: () => void;
   onNext: () => void;
+  disableNext?: boolean;
 };
 
-export function WeekNav({ monday, onPrev, onNext }: WeekNavProps) {
+export function WeekNav({ monday, onPrev, onNext, disableNext }: WeekNavProps) {
   return (
     <div className="flex items-center gap-3">
       <button
@@ -25,7 +26,8 @@ export function WeekNav({ monday, onPrev, onNext }: WeekNavProps) {
       <button
         type="button"
         onClick={onNext}
-        className="rounded border px-3 py-1 text-lg hover:bg-gray-100 cursor-pointer"
+        disabled={disableNext}
+        className="rounded border px-3 py-1 text-lg hover:bg-gray-100 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
         aria-label="Next week"
       >
         ▶
