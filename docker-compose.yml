@@ -152,6 +152,23 @@ services:
       - assembly_viewer_root_nm:/repo/node_modules
       - assembly_viewer_node_modules:/repo/apps/assembly-viewer/node_modules
 
+  matl-cert:
+    image: node:20-alpine
+    container_name: platform_matl_cert
+    working_dir: /app
+    env_file: .env
+    environment:
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
+    command:
+      ["sh", "-c", "npm install && npx next dev --hostname 0.0.0.0 --port 3010"]
+    volumes:
+      - ${MATL_CERT_APP}:/app
+      - matl_cert_node_modules:/app/node_modules
+      - matl_cert_next:/app/.next
+    ports:
+      - "3010:3010"
+
   nesting:
     build:
       context: .
@@ -199,3 +216,5 @@ volumes:
   nesting_pnpm_store:
   nesting_root_nm:
   nesting_node_modules:
+  matl_cert_node_modules:
+  matl_cert_next:
