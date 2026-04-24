@@ -20,6 +20,12 @@ export function AppSidebar() {
           ],
         },
         {
+          heading: "Machine",
+          items: [
+            { label: "Mazak", href: "/laserquote/mazak" },
+          ],
+        },
+        {
           heading: "Admin",
           items: [
             { label: "Rates & Settings", href: "/laserquote/settings" },
