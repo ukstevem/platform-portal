@@ -7,6 +7,20 @@
 
 ---
 
+## Quick start (recommended)
+
+From the `platform-portal` repo:
+
+```bash
+bash scripts/new-app.sh
+```
+
+It prompts for the folder name (`pss-<appname>`), creates `C:\Dev\PSS\<name>`, copies this doc into it, writes `.claude/CLAUDE.md` so Claude auto-loads instructions, runs `git init` + `bd init`, seeds 7 starter beads issues, opens VS Code in the new folder, and launches a Claude Code chat with a pre-filled prompt. Hit Enter on the chat and it'll scaffold from the templates below.
+
+The manual path is also fine — read on.
+
+---
+
 ## ⚠️ Before any code
 
 1. **Reserve a port + service name** in `platform-portal/docs/PORTS.md`.
