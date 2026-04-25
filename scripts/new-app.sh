@@ -11,8 +11,12 @@
 set -euo pipefail
 
 # ── Configuration ──
-ROOT_DIR="/c/Dev/PSS"
-SCAFFOLD_DOC="/c/Dev/PSS/platform-portal/docs/NEW_STANDALONE_APP.md"
+# Derive paths from the script's own location so the script works
+# under any bash flavor (Git Bash /c/, WSL /mnt/c/, MSYS2, etc.).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PORTAL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+ROOT_DIR="$(cd "$PORTAL_DIR/.." && pwd)"
+SCAFFOLD_DOC="$PORTAL_DIR/docs/NEW_STANDALONE_APP.md"
 PROMPT_TEXT='Read NEW_STANDALONE_APP.md and scaffold this PSS standalone app following its templates and conventions. This project uses beads (bd) for task tracking — run `bd prime` first.'
 
 # ── Sanity checks ──
@@ -123,10 +127,42 @@ echo "Initialising beads ..."
 
 echo "  seeded 7 starter issues + 1 memory"
 
+# ── Helpers: cross-bash-flavour path + URL handling ──
+to_windows_path() {
+  local p="$1"
+  if command -v wslpath >/dev/null 2>&1; then
+    wslpath -w "$p"
+  elif command -v cygpath >/dev/null 2>&1; then
+    cygpath -w "$p"
+  else
+    printf '%s' "$p"   # Git Bash auto-translates for .exe calls
+  fi
+}
+
+launch_url() {
+  local url="$1"
+  # Try the available launchers in order; the first that succeeds wins.
+  if command -v cmd >/dev/null 2>&1; then
+    cmd //c start "" "$url" 2>/dev/null && return 0
+  fi
+  if command -v cmd.exe >/dev/null 2>&1; then
+    cmd.exe /c start "" "$url" 2>/dev/null && return 0
+  fi
+  if command -v powershell.exe >/dev/null 2>&1; then
+    powershell.exe -NoProfile -Command "Start-Process -- '$url'" 2>/dev/null && return 0
+  fi
+  if command -v explorer.exe >/dev/null 2>&1; then
+    explorer.exe "$url" 2>/dev/null && return 0
+  fi
+  return 1
+}
+
 # ── Open VS Code ──
 echo
 echo "Opening VS Code ..."
-code -n "$NEW_DIR" "$NEW_DIR/NEW_STANDALONE_APP.md"
+WIN_NEW_DIR=$(to_windows_path "$NEW_DIR")
+WIN_DOC=$(to_windows_path "$NEW_DIR/NEW_STANDALONE_APP.md")
+code -n "$WIN_NEW_DIR" "$WIN_DOC"
 
 # Give VS Code a moment to attach before launching the chat
 sleep 2
@@ -149,8 +185,7 @@ url_encode() {
 encoded_prompt=$(url_encode "$PROMPT_TEXT")
 CHAT_URL="vscode://anthropic.claude-code/open?prompt=$encoded_prompt"
 
-# cmd //c is the Git Bash incantation for Windows 'start'
-if cmd //c start "" "$CHAT_URL" 2>/dev/null; then
+if launch_url "$CHAT_URL"; then
   echo "Claude Code chat launched (prompt pre-filled — hit Enter to submit)"
 else
   echo "  (couldn't auto-launch chat — open Claude manually; .claude/CLAUDE.md will brief it)"
