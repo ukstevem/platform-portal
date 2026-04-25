@@ -26,6 +26,18 @@ docker buildx build \
   --push \
   docker/nginx/
 
+# Apps using Next.js `output: 'standalone'` get a slim runtime image.
+# Move an app into this list once its next.config.ts enables standalone mode.
+STANDALONE_APPS=("assembly-viewer")
+
+is_standalone() {
+  local app="$1"
+  for s in "${STANDALONE_APPS[@]}"; do
+    [[ "$s" == "$app" ]] && return 0
+  done
+  return 1
+}
+
 # Build and push each app
 for APP in portal jobcards documents timesheets scanner laserquote assembly-viewer; do
   echo ""
@@ -39,9 +51,16 @@ for APP in portal jobcards documents timesheets scanner laserquote assembly-view
     fi
   done
 
+  if is_standalone "$APP"; then
+    TARGET="runner-standalone"
+  else
+    TARGET="runner"
+  fi
+
   docker buildx build \
     --platform "$PLATFORM" \
     -f docker/node/Dockerfile.prod \
+    --target "$TARGET" \
     --build-arg APP_NAME="$APP" \
     --build-arg APP_PORT="$APP_PORT" \
     --build-arg NEXT_PUBLIC_SUPABASE_URL="${NEXT_PUBLIC_SUPABASE_URL:-}" \

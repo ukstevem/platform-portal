@@ -67,7 +67,8 @@ ENV NEXT_PUBLIC_LASER_QUOTE_SERVICE_URL=${NEXT_PUBLIC_LASER_QUOTE_SERVICE_URL}
 
 RUN pnpm -C apps/${APP_NAME} build
 
-# ─── Stage 3: Production runner ───
+# ─── Stage 3a: Legacy runner (full workspace) ───
+# Used by apps that haven't migrated to Next.js standalone output yet.
 FROM node:20-alpine AS runner
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 WORKDIR /repo
@@ -86,3 +87,30 @@ COPY --from=builder /repo/node_modules/ ./node_modules/
 EXPOSE ${APP_PORT}
 
 CMD ["sh", "-c", "cd apps/${APP_NAME} && npx next start --hostname 0.0.0.0 --port ${PORT}"]
+
+# ─── Stage 3b: Standalone runner ───
+# Used by apps with `output: 'standalone'` + outputFileTracingRoot set to the
+# monorepo root. Runtime image is ~100 MB instead of ~800 MB because Next.js
+# traces only the files the app actually imports.
+#
+# Select with:  docker buildx build --target runner-standalone ...
+FROM node:20-alpine AS runner-standalone
+WORKDIR /repo
+
+ARG APP_NAME
+ARG APP_PORT=3000
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=${APP_PORT}
+ENV HOSTNAME=0.0.0.0
+
+# The standalone output already contains the minimal server + traced deps.
+# With outputFileTracingRoot = monorepo root, the dir layout inside
+# .next/standalone/ mirrors /repo, so copy its contents straight to WORKDIR.
+COPY --from=builder /repo/apps/${APP_NAME}/.next/standalone/ ./
+COPY --from=builder /repo/apps/${APP_NAME}/.next/static ./apps/${APP_NAME}/.next/static
+COPY --from=builder /repo/apps/${APP_NAME}/public ./apps/${APP_NAME}/public
+
+EXPOSE ${APP_PORT}
+
+CMD ["sh", "-c", "node apps/${APP_NAME}/server.js"]

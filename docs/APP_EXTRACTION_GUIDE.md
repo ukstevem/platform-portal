@@ -69,6 +69,8 @@ Three options, pick one per package:
 2. **Publish as npm** (`@pss/ui`, `@pss/auth`, `@pss/supabase`) to GitHub Packages. Proper, but higher up-front cost.
 3. **Git submodule**. Avoid — the last-mile ergonomics are bad on Windows.
 
+When copy-and-freezing, **strip the `workspace:*` / internal deps from each copied package's `package.json`**. Leave only `peerDependencies` and (where applicable) real npm deps. Inter-package imports (e.g. `@platform/auth` importing `@platform/supabase`) resolve via the app's own `node_modules` because the app declares all three as top-level `file:./packages/*` deps. Keeping `workspace:*` in the child packages will break `npm ci`.
+
 ### 2c. `next.config.ts`
 
 ```ts
@@ -79,7 +81,25 @@ const nextConfig = {
 };
 ```
 
-### 2d. `Dockerfile` (production, multi-stage)
+### 2d. `.dockerignore` (mandatory — don't skip)
+
+`npm install` on Windows creates symlinks in `node_modules` for `file:` deps that point to Windows paths. `COPY . .` in the Docker build then overlays those broken symlinks onto the clean Linux `node_modules` from the `deps` stage and the build fails with `Module not found: Can't resolve '@platform/...'`.
+
+Create `pss-<appname>/app/.dockerignore`:
+
+```
+node_modules
+.next
+.git
+*.tsbuildinfo
+.env
+.env.local
+.env.*.local
+Dockerfile
+.dockerignore
+```
+
+### 2e. `Dockerfile` (production, multi-stage)
 
 ```dockerfile
 # syntax=docker/dockerfile:1.6
@@ -112,7 +132,7 @@ CMD ["node", "server.js"]
 
 Multi-stage keeps the runtime image small (~150 MB vs ~1 GB dev image), which matters on the Pi.
 
-### 2e. `docker-compose.app.yml`
+### 2f. `docker-compose.app.yml`
 
 ```yaml
 services:

@@ -38,6 +38,16 @@ declare -A PORTS=(
   [assembly-viewer]=3007 [nesting]=3008
 )
 
+# Keep in sync with scripts/deploy.sh STANDALONE_APPS
+STANDALONE_APPS=("assembly-viewer")
+is_standalone() {
+  local app="$1"
+  for s in "${STANDALONE_APPS[@]}"; do
+    [[ "$s" == "$app" ]] && return 0
+  done
+  return 1
+}
+
 RUN_ID="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
 GIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
@@ -57,9 +67,12 @@ for APP in "${APPS[@]}"; do
   START=$(date +%s)
   STATUS="ok"
 
+  if is_standalone "$APP"; then TARGET="runner-standalone"; else TARGET="runner"; fi
+
   if ! docker buildx build \
       --platform "$PLATFORM" \
       -f docker/node/Dockerfile.prod \
+      --target "$TARGET" \
       --build-arg APP_NAME="$APP" \
       --build-arg APP_PORT="$APP_PORT" \
       --build-arg NEXT_PUBLIC_SUPABASE_URL="${NEXT_PUBLIC_SUPABASE_URL:-}" \

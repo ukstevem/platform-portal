@@ -25,10 +25,11 @@ The host is a Raspberry Pi (ARM64). **Never** build images on the Pi — it runs
 1. **Never change the app's port** unless `docs/PORTS.md` is updated **and** `platform-portal/docker/nginx/production.conf` is updated **and** both are pushed.
 2. **Never rename the Docker service / container.** nginx resolves it by name on `platform_net`.
 3. **Never drop `basePath`** from `next.config.ts`. Removing it breaks every relative link once the gateway fronts the app.
-4. **Never commit `.env`.** Every variable the app reads must appear in `.env.example` (value may be blank).
+4. **Never commit `.env`.** Every variable the app reads must appear in `.env.example` (value may be blank). The **canonical `.env` lives with the gateway** at `platform-portal/.env`; each standalone compose file references it via `env_file: ../platform-portal/.env`. Edit secrets there, not here.
 5. **Never delete the `platform_net` network.** It is shared with every other PSS service on the host.
 6. **Never add `--no-verify`, `--no-gpg-sign`, or skip hooks** unless the user explicitly asks.
 7. **Build-time `NEXT_PUBLIC_*` vars** must be passed as Docker `--build-arg`, not only in `environment:`. Changing them requires a **rebuild**, not a restart.
+8. **Keep `.dockerignore` in place** (at `app/.dockerignore`). It excludes the host's `node_modules` and `.next` from the build context. Without it, Windows-path symlinks from local `npm install` overlay the container's clean `node_modules` and the build fails with `Module not found: Can't resolve '@platform/*'`.
 
 ---
 
@@ -40,9 +41,9 @@ Standard Next.js work. Respect existing component patterns. If a shared componen
 
 ### Adding an environment variable
 
-1. Add to `.env.example` with a blank or sample value.
-2. If client-visible, name it `NEXT_PUBLIC_*` and add a `--build-arg` for it in the Dockerfile + the build command.
-3. If server-only, add it to `docker-compose.app.yml` `environment:` block.
+1. **Secrets / cross-app values** (Supabase keys, gateway URLs, doc service URL): add to `platform-portal/.env` — the canonical file. This repo's `docker-compose.app.yml` already picks it up via `env_file: ../platform-portal/.env`.
+2. **App-specific values** (anything only this app uses): add to `.env.example` here with a blank or sample value, and to `docker-compose.app.yml` `environment:` block.
+3. **Build-time client-visible values**: prefix with `NEXT_PUBLIC_*`, declare as `ARG` + `ENV` in the Dockerfile, and pass via `--build-arg` in `build.sh`. Changing these requires a **rebuild**, not a restart.
 4. Document it in the README.
 
 ### Changing a port — **only if absolutely necessary**
