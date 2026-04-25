@@ -90,7 +90,10 @@ echo
 echo "Initialising git ..."
 ( cd "$NEW_DIR" && git init -b main >/dev/null )
 echo "Initialising beads ..."
-( cd "$NEW_DIR" && bd init >/dev/null 2>&1 || bd init )
+# --non-interactive skips role/setup prompts; --role maintainer is the
+# default but explicit here for clarity. Output is left visible so any
+# real failure surfaces instead of looking like a hang.
+( cd "$NEW_DIR" && bd init --non-interactive --role maintainer )
 
 # ── Seed bd with starter tasks ──
 ( cd "$NEW_DIR" && {
