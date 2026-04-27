@@ -19,6 +19,8 @@ import {
 const POLL_MS = 20000;
 const FALSE_START_THRESHOLD_S = 5;
 const REAL_RUN_MIN_S = 30;
+const TIMELINE_START_HOUR = 6;
+const TIMELINE_END_HOUR = 17;
 
 type DeviceStatus = {
   site: string;
@@ -55,9 +57,11 @@ type ProgramRun = {
   sheet_thickness: string | null;
 };
 
+// Colours for the timeline. READY is intentionally omitted — it's the default
+// state, so absence-of-colour communicates "running normally" and lets the
+// problem states stand out.
 const EXEC_COLOURS: Record<string, string> = {
   ACTIVE: "#16a34a",
-  READY: "#3b82f6",
   FEED_HOLD: "#f59e0b",
   STOPPED: "#dc2626",
   INTERRUPTED: "#dc2626",
@@ -87,20 +91,38 @@ function londonDateString(d: Date = new Date()): string {
   return `${y}-${m}-${dd}`;
 }
 
-function londonDayRange(dateStr: string): { start: Date; end: Date } {
-  const probe = new Date(`${dateStr}T12:00:00Z`);
+function londonOffsetMin(probeUtc: Date): number {
   const offsetPart = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Europe/London",
     timeZoneName: "longOffset",
   })
-    .formatToParts(probe)
+    .formatToParts(probeUtc)
     .find((p) => p.type === "timeZoneName");
   const m = offsetPart?.value.match(/GMT([+-])(\d{2}):(\d{2})/);
-  const offsetMin = m ? (m[1] === "+" ? 1 : -1) * (parseInt(m[2]) * 60 + parseInt(m[3])) : 0;
+  return m ? (m[1] === "+" ? 1 : -1) * (parseInt(m[2]) * 60 + parseInt(m[3])) : 0;
+}
+
+function londonDayRange(dateStr: string): { start: Date; end: Date } {
+  const probe = new Date(`${dateStr}T12:00:00Z`);
+  const offsetMin = londonOffsetMin(probe);
   const start = new Date(`${dateStr}T00:00:00Z`);
   start.setMinutes(start.getMinutes() - offsetMin);
   const end = new Date(start);
   end.setDate(end.getDate() + 1);
+  return { start, end };
+}
+
+function londonHourRange(
+  dateStr: string,
+  startHour: number,
+  endHour: number
+): { start: Date; end: Date } {
+  const probe = new Date(`${dateStr}T12:00:00Z`);
+  const offsetMin = londonOffsetMin(probe);
+  const start = new Date(`${dateStr}T${String(startHour).padStart(2, "0")}:00:00Z`);
+  start.setMinutes(start.getMinutes() - offsetMin);
+  const end = new Date(`${dateStr}T${String(endHour).padStart(2, "0")}:00:00Z`);
+  end.setMinutes(end.getMinutes() - offsetMin);
   return { start, end };
 }
 
@@ -640,6 +662,10 @@ export default function MachinePage() {
         </div>
         <Timeline dateStr={timelineDate} segments={timelineSegments} />
         <div className="flex flex-wrap gap-4 mt-2 text-xs">
+          <div className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3 rounded bg-gray-50 border border-gray-300" />
+            <span className="text-gray-600">READY (idle)</span>
+          </div>
           {Object.entries(EXEC_COLOURS).map(([state, colour]) => (
             <div key={state} className="flex items-center gap-1.5">
               <span className="inline-block w-3 h-3 rounded" style={{ backgroundColor: colour }} />
@@ -855,16 +881,24 @@ function Timeline({
   dateStr: string;
   segments: { from: Date; to: Date; state: string; program: string | null }[];
 }) {
-  const { start, end } = londonDayRange(dateStr);
+  const { start, end } = londonHourRange(dateStr, TIMELINE_START_HOUR, TIMELINE_END_HOUR);
   const total = end.getTime() - start.getTime();
 
   return (
     <div className="bg-white border border-gray-200 rounded-lg p-4">
       <div className="relative h-10 bg-gray-50 rounded overflow-hidden">
         {segments.map((seg, i) => {
-          const left = ((seg.from.getTime() - start.getTime()) / total) * 100;
-          const width = ((seg.to.getTime() - seg.from.getTime()) / total) * 100;
-          const durMin = Math.round((seg.to.getTime() - seg.from.getTime()) / 60000);
+          // Clip segment to visible window
+          const fromMs = Math.max(seg.from.getTime(), start.getTime());
+          const toMs = Math.min(seg.to.getTime(), end.getTime());
+          if (toMs <= fromMs) return null;
+          // READY = default state, render as empty so problem states stand out
+          if (seg.state === "READY") return null;
+          const fill = EXEC_COLOURS[seg.state];
+          if (!fill) return null;
+          const left = ((fromMs - start.getTime()) / total) * 100;
+          const width = ((toMs - fromMs) / total) * 100;
+          const durMin = Math.round((toMs - fromMs) / 60000);
           return (
             <div
               key={i}
@@ -872,16 +906,16 @@ function Timeline({
               style={{
                 left: `${left}%`,
                 width: `${width}%`,
-                backgroundColor: EXEC_COLOURS[seg.state] ?? "#d1d5db",
+                backgroundColor: fill,
               }}
-              title={`${seg.state} · ${formatTime(seg.from)}–${formatTime(seg.to)} (${durMin} min)${seg.program ? `\n${seg.program}` : ""}`}
+              title={`${seg.state} · ${formatTime(new Date(fromMs))}–${formatTime(new Date(toMs))} (${durMin} min)${seg.program ? `\n${seg.program}` : ""}`}
             />
           );
         })}
       </div>
       <div className="flex justify-between mt-2 text-xs text-gray-400">
-        {Array.from({ length: 13 }).map((_, i) => {
-          const h = i * 2;
+        {Array.from({ length: TIMELINE_END_HOUR - TIMELINE_START_HOUR + 1 }).map((_, i) => {
+          const h = TIMELINE_START_HOUR + i;
           return <span key={h}>{String(h).padStart(2, "0")}:00</span>;
         })}
       </div>
