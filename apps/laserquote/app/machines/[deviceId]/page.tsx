@@ -77,7 +77,9 @@ const QUOTE_CONFIRMED_STATUSES = new Set([
 
 function normaliseProgram(name: string | null | undefined): string | null {
   if (!name) return null;
-  return name.trim().toUpperCase();
+  // Mazak reports program names with the .NC suffix; CSV imports store the
+  // stem only. Strip any trailing 2-4 char extension so both sides match.
+  return name.trim().toUpperCase().replace(/\.[A-Z0-9]{2,4}$/, "");
 }
 
 // Fetch quote matches for a list of program names (case-insensitive)
