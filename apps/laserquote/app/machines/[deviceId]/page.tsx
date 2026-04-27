@@ -57,6 +57,69 @@ type ProgramRun = {
   sheet_thickness: string | null;
 };
 
+type QuoteMatch = {
+  importId: string;
+  quoteId: number;
+  quoteNumber: number;
+  totalValue: number | null;
+  status: string;
+};
+
+// Statuses to ignore when picking the "active" quote for a program
+const QUOTE_DEAD_STATUSES = new Set(["lost", "cancelled"]);
+
+function normaliseProgram(name: string | null | undefined): string | null {
+  if (!name) return null;
+  return name.trim().toUpperCase();
+}
+
+// Fetch quote matches for a list of program names (case-insensitive)
+async function fetchQuoteMatches(programNames: string[]): Promise<Map<string, QuoteMatch>> {
+  const result = new Map<string, QuoteMatch>();
+  if (programNames.length === 0) return result;
+
+  // Build an or() filter using ilike for case-insensitive match
+  const orParts = programNames
+    .filter((n) => n && n.trim() !== "")
+    .map((n) => `program_name.ilike.${n.replace(/[(),]/g, "\\$&")}`);
+  if (orParts.length === 0) return result;
+
+  const { data } = await supabase
+    .from("laser_program")
+    .select(
+      "program_name, import_id, import:laser_import!inner(quotes:laser_quote(id, quote_number, total_value, status, updated_at))"
+    )
+    .or(orParts.join(","));
+
+  type Row = {
+    program_name: string;
+    import_id: string;
+    import: { quotes: { id: number; quote_number: number; total_value: number | null; status: string; updated_at: string }[] } | null;
+  };
+
+  for (const row of (data as Row[] | null) ?? []) {
+    const key = normaliseProgram(row.program_name);
+    if (!key) continue;
+    if (result.has(key)) continue;
+    const quotes = row.import?.quotes ?? [];
+    // Prefer alive quotes, then most recent updated_at
+    const alive = quotes.filter((q) => !QUOTE_DEAD_STATUSES.has(q.status));
+    const pool = alive.length > 0 ? alive : quotes;
+    if (pool.length === 0) continue;
+    pool.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+    const q = pool[0];
+    result.set(key, {
+      importId: row.import_id,
+      quoteId: q.id,
+      quoteNumber: q.quote_number,
+      totalValue: q.total_value,
+      status: q.status,
+    });
+  }
+
+  return result;
+}
+
 // Colours for the timeline. READY is intentionally omitted — it's the default
 // state, so absence-of-colour communicates "running normally" and lets the
 // problem states stand out.
@@ -234,8 +297,12 @@ export default function MachinePage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [filter, setFilter] = useState("");
 
-  // 30-day chart
+  // 30-day charts
   const [dailyHours, setDailyHours] = useState<{ day: string; hours: number }[]>([]);
+  const [dailyTurnover, setDailyTurnover] = useState<{ day: string; value: number }[]>([]);
+
+  // Quote lookup for currently displayed runs (program name → quote)
+  const [quoteMatches, setQuoteMatches] = useState<Map<string, QuoteMatch>>(new Map());
 
   // Now ticker for "last seen" age
   useEffect(() => {
@@ -397,8 +464,15 @@ export default function MachinePage() {
         .order("ts", { ascending: false });
 
       if (cancelled) return;
-      setRuns((data as ProgramRun[] | null) ?? []);
+      const rows = (data as ProgramRun[] | null) ?? [];
+      setRuns(rows);
       setRunsLoading(false);
+
+      // Look up quotes for the distinct program names in this set
+      const names = [...new Set(rows.map((r) => normaliseProgram(r.program)).filter(Boolean) as string[])];
+      const matches = await fetchQuoteMatches(names);
+      if (cancelled) return;
+      setQuoteMatches(matches);
     };
 
     load();
@@ -409,7 +483,7 @@ export default function MachinePage() {
     };
   }, [user, deviceId, rangeKey, customFrom, customTo]);
 
-  // 30-day cutting hours
+  // 30-day cutting hours + daily turnover
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
@@ -420,7 +494,7 @@ export default function MachinePage() {
       start.setDate(start.getDate() - 29);
       const { data } = await supabase
         .from("pss_laser_program_runs")
-        .select("ts, runtime_seconds, ended_state")
+        .select("ts, program, runtime_seconds, ended_state")
         .eq("device_id", deviceId)
         .in("ended_state", ["READY", "FEED_HOLD"])
         .gte("ts", start.toISOString())
@@ -428,23 +502,61 @@ export default function MachinePage() {
         .order("ts", { ascending: true });
       if (cancelled) return;
 
-      const buckets = new Map<string, number>();
+      const rows = (data as ProgramRun[] | null) ?? [];
+
+      // Cutting hours per day
+      const hoursBuckets = new Map<string, number>();
       for (let i = 0; i < 30; i++) {
         const d = new Date(start);
         d.setDate(start.getDate() + i);
-        buckets.set(londonDateString(d), 0);
+        hoursBuckets.set(londonDateString(d), 0);
       }
-      for (const r of (data as ProgramRun[] | null) ?? []) {
+      for (const r of rows) {
         if (!r.ts || !r.runtime_seconds) continue;
         const day = londonDateString(new Date(r.ts));
-        if (buckets.has(day)) {
-          buckets.set(day, buckets.get(day)! + r.runtime_seconds);
+        if (hoursBuckets.has(day)) {
+          hoursBuckets.set(day, hoursBuckets.get(day)! + r.runtime_seconds);
         }
       }
       setDailyHours(
-        Array.from(buckets.entries()).map(([day, secs]) => ({
+        Array.from(hoursBuckets.entries()).map(([day, secs]) => ({
           day: day.slice(5),
           hours: Math.round((secs / 3600) * 10) / 10,
+        }))
+      );
+
+      // Turnover per day: each quote attributed once on its first run day in window
+      const programNames = [...new Set(
+        rows
+          .filter((r) => (r.runtime_seconds ?? 0) >= REAL_RUN_MIN_S)
+          .map((r) => normaliseProgram(r.program))
+          .filter(Boolean) as string[]
+      )];
+      const matches = await fetchQuoteMatches(programNames);
+      if (cancelled) return;
+
+      const turnoverBuckets = new Map<string, number>();
+      for (const day of hoursBuckets.keys()) turnoverBuckets.set(day, 0);
+
+      // Walk runs in ascending order; first time we see a quote, attribute its full value
+      const seenQuotes = new Set<number>();
+      for (const r of rows) {
+        if ((r.runtime_seconds ?? 0) < REAL_RUN_MIN_S) continue;
+        const key = normaliseProgram(r.program);
+        if (!key) continue;
+        const match = matches.get(key);
+        if (!match || match.totalValue == null) continue;
+        if (seenQuotes.has(match.quoteId)) continue;
+        seenQuotes.add(match.quoteId);
+        const day = londonDateString(new Date(r.ts));
+        if (turnoverBuckets.has(day)) {
+          turnoverBuckets.set(day, turnoverBuckets.get(day)! + match.totalValue);
+        }
+      }
+      setDailyTurnover(
+        Array.from(turnoverBuckets.entries()).map(([day, value]) => ({
+          day: day.slice(5),
+          value: Math.round(value * 100) / 100,
         }))
       );
     })();
@@ -688,22 +800,42 @@ export default function MachinePage() {
           <Tile label="Programs Completed" value={String(utilisation.programsCompleted)} />
           <Tile label="Parts Produced" value={String(utilisation.partsProduced)} />
         </div>
-        <div className="bg-white border border-gray-200 rounded-lg p-4">
-          <p className="text-xs text-gray-500 mb-2">Cutting hours · last 30 days</p>
-          <div className="h-48">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={dailyHours} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="day" tick={{ fontSize: 10 }} interval={4} />
-                <YAxis tick={{ fontSize: 10 }} />
-                <Tooltip
-                  formatter={(v) => [`${Number(v)} hrs`, "Cutting"]}
-                  labelStyle={{ fontSize: 12 }}
-                  contentStyle={{ fontSize: 12 }}
-                />
-                <Bar dataKey="hours" fill="#16a34a" />
-              </BarChart>
-            </ResponsiveContainer>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <p className="text-xs text-gray-500 mb-2">Cutting hours · last 30 days</p>
+            <div className="h-48">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={dailyHours} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="day" tick={{ fontSize: 10 }} interval={4} />
+                  <YAxis tick={{ fontSize: 10 }} />
+                  <Tooltip
+                    formatter={(v) => [`${Number(v)} hrs`, "Cutting"]}
+                    labelStyle={{ fontSize: 12 }}
+                    contentStyle={{ fontSize: 12 }}
+                  />
+                  <Bar dataKey="hours" fill="#16a34a" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <p className="text-xs text-gray-500 mb-2">Daily turnover · last 30 days</p>
+            <div className="h-48">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={dailyTurnover} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="day" tick={{ fontSize: 10 }} interval={4} />
+                  <YAxis tick={{ fontSize: 10 }} />
+                  <Tooltip
+                    formatter={(v) => [`£${Number(v).toFixed(2)}`, "Turnover"]}
+                    labelStyle={{ fontSize: 12 }}
+                    contentStyle={{ fontSize: 12 }}
+                  />
+                  <Bar dataKey="value" fill="#0d9488" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         </div>
       </div>
@@ -780,6 +912,8 @@ export default function MachinePage() {
                   <SortTh label="Runtime" keyName="runtime_seconds" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} align="right" />
                   <SortTh label="Parts" keyName="parts_made" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} align="right" />
                   <SortTh label="Ended" keyName="ended_state" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} />
+                  <th className="py-2 pr-3 font-medium">Quote</th>
+                  <th className="py-2 pr-3 font-medium text-right">Value</th>
                   <th className="py-2 pr-3 font-medium">Comment</th>
                 </tr>
               </thead>
@@ -790,6 +924,7 @@ export default function MachinePage() {
                   const muted = isFeedHold || isVeryShort;
                   const mat = splitMaterialGas(r.material);
                   const dims = r.dimensions;
+                  const quote = quoteMatches.get(normaliseProgram(r.program) ?? "");
                   return (
                     <tr
                       key={r.id}
@@ -820,6 +955,21 @@ export default function MachinePage() {
                         >
                           {r.ended_state ?? "—"}
                         </span>
+                      </td>
+                      <td className="py-2 pr-3 font-mono text-xs">
+                        {quote ? (
+                          <a
+                            href={`/laserquote/imports/${quote.importId}`}
+                            className="text-blue-600 hover:underline"
+                          >
+                            {quote.quoteNumber}
+                          </a>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </td>
+                      <td className="py-2 pr-3 text-right font-mono text-xs">
+                        {quote?.totalValue != null ? `£${quote.totalValue.toFixed(2)}` : <span className="text-gray-300">—</span>}
                       </td>
                       <td
                         className="py-2 pr-3 text-xs text-gray-500 truncate max-w-xs"
