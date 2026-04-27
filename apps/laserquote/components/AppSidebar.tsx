@@ -22,7 +22,7 @@ export function AppSidebar() {
         {
           heading: "Machine",
           items: [
-            { label: "Mazak", href: "/laserquote/mazak" },
+            { label: "Mazak Laser", href: "/laserquote/machines/MAZAK-SN328525" },
           ],
         },
         {
