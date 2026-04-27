@@ -65,8 +65,15 @@ type QuoteMatch = {
   status: string;
 };
 
-// Statuses to ignore when picking the "active" quote for a program
-const QUOTE_DEAD_STATUSES = new Set(["lost", "cancelled"]);
+// Only confirmed orders count toward turnover and surface in the runs table.
+// Drafts/issued/revised/error are still in the quote phase; lost/cancelled
+// are dead. Once a quote reaches "won" or beyond it represents real revenue.
+const QUOTE_CONFIRMED_STATUSES = new Set([
+  "won",
+  "completed",
+  "ready_for_collection",
+  "delivered",
+]);
 
 function normaliseProgram(name: string | null | undefined): string | null {
   if (!name) return null;
@@ -101,13 +108,12 @@ async function fetchQuoteMatches(programNames: string[]): Promise<Map<string, Qu
     const key = normaliseProgram(row.program_name);
     if (!key) continue;
     if (result.has(key)) continue;
-    const quotes = row.import?.quotes ?? [];
-    // Prefer alive quotes, then most recent updated_at
-    const alive = quotes.filter((q) => !QUOTE_DEAD_STATUSES.has(q.status));
-    const pool = alive.length > 0 ? alive : quotes;
-    if (pool.length === 0) continue;
-    pool.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-    const q = pool[0];
+    const quotes = (row.import?.quotes ?? []).filter((q) =>
+      QUOTE_CONFIRMED_STATUSES.has(q.status)
+    );
+    if (quotes.length === 0) continue;
+    quotes.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+    const q = quotes[0];
     result.set(key, {
       importId: row.import_id,
       quoteId: q.id,
