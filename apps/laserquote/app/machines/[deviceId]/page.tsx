@@ -600,6 +600,7 @@ export default function MachinePage() {
   };
 
   const headerMaterial = splitMaterialGas(currentMaterial);
+  const isOnline = device?.status === "online";
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
@@ -612,30 +613,32 @@ export default function MachinePage() {
             <p className="text-xs text-gray-500">Device</p>
             <p className="font-mono text-sm font-bold">{deviceId}</p>
             <p className="text-xs text-gray-400 mt-0.5">
-              <span className={device?.status === "online" ? "text-green-600" : "text-red-600"}>
-                {device?.status === "online" ? "Online" : "Offline"}
+              <span className={isOnline ? "text-green-600" : "text-red-600"}>
+                {isOnline ? "Online" : "Offline"}
               </span>
               {" · seen "}
               {ageLabel(device?.last_seen ?? null, now)}
             </p>
           </div>
-          <div>
-            <p className="text-xs text-gray-500">Execution</p>
+          <div className={isOnline ? "" : "opacity-40"} title={isOnline ? undefined : "Last known — device offline"}>
+            <p className="text-xs text-gray-500">
+              {isOnline ? "Execution" : "Execution (last known)"}
+            </p>
             <span
               className={`inline-block px-3 py-1 rounded-full text-sm font-semibold ${EXEC_BADGE[currentExec ?? ""] ?? "bg-gray-100 text-gray-700"}`}
             >
               {currentExec ?? "—"}
             </span>
           </div>
-          <div>
+          <div className={isOnline ? "" : "opacity-40"} title={isOnline ? undefined : "Last known — device offline"}>
             <p className="text-xs text-gray-500">Program</p>
             <p className="font-mono text-sm font-medium">{currentProgram ?? "—"}</p>
           </div>
-          <div>
+          <div className={isOnline ? "" : "opacity-40"} title={isOnline ? undefined : "Last known — device offline"}>
             <p className="text-xs text-gray-500">Mode</p>
             <p className="text-sm font-medium">{currentMode ?? "—"}</p>
           </div>
-          <div>
+          <div className={isOnline ? "" : "opacity-40"} title={isOnline ? undefined : "Last known — device offline"}>
             <p className="text-xs text-gray-500">Material</p>
             <div className="text-sm font-medium flex items-center gap-1.5">
               <span>{headerMaterial.grade ?? "—"}</span>
