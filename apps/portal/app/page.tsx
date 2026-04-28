@@ -52,6 +52,11 @@ const apps = [
     href: "/matl-cert/",
     description: "Track and trace material certificates against project deliverables.",
   },
+  {
+    name: "Employee Presence",
+    href: "/employee-presence/",
+    description: "Track on-site employee presence and attendance.",
+  },
 ];
 
 export default function PortalHome() {
