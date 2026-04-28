@@ -448,9 +448,13 @@ export default function MachinePage() {
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
+    // Only show the spinner on the first load of this effect instance
+    // (initial mount or range change). Polls update silently to keep scroll
+    // position stable for the operator.
+    let firstLoad = true;
 
     const load = async () => {
-      setRunsLoading(true);
+      if (firstLoad) setRunsLoading(true);
       const today = londonDateString();
       let fromDate = today;
       let toDate = today;
@@ -480,7 +484,8 @@ export default function MachinePage() {
       if (cancelled) return;
       const rows = (data as ProgramRun[] | null) ?? [];
       setRuns(rows);
-      setRunsLoading(false);
+      if (firstLoad) setRunsLoading(false);
+      firstLoad = false;
 
       // Look up quotes for the distinct program names in this set
       const names = [...new Set(rows.map((r) => normaliseProgram(r.program)).filter(Boolean) as string[])];
@@ -672,6 +677,24 @@ export default function MachinePage() {
 
     return filtered;
   }, [runs, hideFalseStarts, filter, sortKey, sortDir]);
+
+  // For each quote, count how many end-of-cycle runs (READY + >= REAL_RUN_MIN_S)
+  // it has within the visible runs set. Used to share the quote total across
+  // its actual runs so the value column adds up to the quote total rather than
+  // multiplying it by the number of runs.
+  const quoteRunCounts = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const r of runs) {
+      if (r.ended_state !== "READY") continue;
+      if ((r.runtime_seconds ?? 0) < REAL_RUN_MIN_S) continue;
+      const key = normaliseProgram(r.program);
+      if (!key) continue;
+      const match = quoteMatches.get(key);
+      if (!match) continue;
+      counts.set(match.quoteId, (counts.get(match.quoteId) ?? 0) + 1);
+    }
+    return counts;
+  }, [runs, quoteMatches]);
 
   // Utilisation tiles for selected range
   const utilisation = useMemo(() => {
@@ -941,7 +964,17 @@ export default function MachinePage() {
                   const muted = isFeedHold || isVeryShort;
                   const mat = splitMaterialGas(r.material);
                   const dims = r.dimensions;
-                  const quote = quoteMatches.get(normaliseProgram(r.program) ?? "");
+                  // Only end-of-cycle rows (cut completed cleanly) attribute a
+                  // quote/value. Pauses, alarms, false starts → no quote shown.
+                  const isCutCompletion =
+                    r.ended_state === "READY" && (r.runtime_seconds ?? 0) >= REAL_RUN_MIN_S;
+                  const quote = isCutCompletion
+                    ? quoteMatches.get(normaliseProgram(r.program) ?? "")
+                    : undefined;
+                  const quoteShare =
+                    quote && quote.totalValue != null
+                      ? quote.totalValue / Math.max(1, quoteRunCounts.get(quote.quoteId) ?? 1)
+                      : null;
                   return (
                     <tr
                       key={r.id}
@@ -989,7 +1022,13 @@ export default function MachinePage() {
                         )}
                       </td>
                       <td className="py-2 pr-3 text-right font-mono text-xs">
-                        {quote?.totalValue != null ? `£${quote.totalValue.toFixed(2)}` : <span className="text-gray-300">—</span>}
+                        {quoteShare != null ? (
+                          <span title={quote ? `Quote total £${quote.totalValue?.toFixed(2)} ÷ ${quoteRunCounts.get(quote.quoteId) ?? 1} runs` : undefined}>
+                            £{quoteShare.toFixed(2)}
+                          </span>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
                       </td>
                       <td
                         className="py-2 pr-3 text-xs text-gray-500 truncate max-w-xs"
