@@ -6,6 +6,7 @@ import { useAuth } from "@platform/auth/AuthProvider";
 import { AuthButton } from "@platform/auth/AuthButton";
 import { PageHeader } from "@platform/ui";
 import { supabase } from "@platform/supabase/client";
+import { StatusBadge } from "@/components/StatusBadge";
 import {
   BarChart,
   Bar,
@@ -65,9 +66,12 @@ type QuoteMatch = {
   status: string;
 };
 
-// Only confirmed orders count toward turnover and surface in the runs table.
-// Drafts/issued/revised/error are still in the quote phase; lost/cancelled
-// are dead. Once a quote reaches "won" or beyond it represents real revenue.
+// Statuses we ignore entirely — these quotes shouldn't ever surface as a match.
+const QUOTE_DEAD_STATUSES = new Set(["lost", "cancelled"]);
+
+// Confirmed orders — these are the only quotes that count toward turnover.
+// Drafts/issued/revised/error still surface in the runs table (with a badge)
+// so operators can see whether a run is an order or still a quote.
 const QUOTE_CONFIRMED_STATUSES = new Set([
   "won",
   "completed",
@@ -110,12 +114,14 @@ async function fetchQuoteMatches(programNames: string[]): Promise<Map<string, Qu
     const key = normaliseProgram(row.program_name);
     if (!key) continue;
     if (result.has(key)) continue;
-    const quotes = (row.import?.quotes ?? []).filter((q) =>
-      QUOTE_CONFIRMED_STATUSES.has(q.status)
-    );
-    if (quotes.length === 0) continue;
-    quotes.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-    const q = quotes[0];
+    // Drop dead quotes; everything else is a candidate.
+    const candidates = (row.import?.quotes ?? []).filter((q) => !QUOTE_DEAD_STATUSES.has(q.status));
+    if (candidates.length === 0) continue;
+    // Prefer a confirmed quote over any other; within a tier, pick most-recent updated_at.
+    const confirmed = candidates.filter((q) => QUOTE_CONFIRMED_STATUSES.has(q.status));
+    const pool = confirmed.length > 0 ? confirmed : candidates;
+    pool.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+    const q = pool[0];
     result.set(key, {
       importId: row.import_id,
       quoteId: q.id,
@@ -546,7 +552,9 @@ export default function MachinePage() {
       const turnoverBuckets = new Map<string, number>();
       for (const day of hoursBuckets.keys()) turnoverBuckets.set(day, 0);
 
-      // Walk runs in ascending order; first time we see a quote, attribute its full value
+      // Walk runs in ascending order; first time we see a confirmed quote,
+      // attribute its full value. Drafts/issued/etc are visible in the runs
+      // table via fetchQuoteMatches but don't count toward turnover.
       const seenQuotes = new Set<number>();
       for (const r of rows) {
         if ((r.runtime_seconds ?? 0) < REAL_RUN_MIN_S) continue;
@@ -554,6 +562,7 @@ export default function MachinePage() {
         if (!key) continue;
         const match = matches.get(key);
         if (!match || match.totalValue == null) continue;
+        if (!QUOTE_CONFIRMED_STATUSES.has(match.status)) continue;
         if (seenQuotes.has(match.quoteId)) continue;
         seenQuotes.add(match.quoteId);
         const day = londonDateString(new Date(r.ts));
@@ -964,14 +973,17 @@ export default function MachinePage() {
                           {r.ended_state ?? "—"}
                         </span>
                       </td>
-                      <td className="py-2 pr-3 font-mono text-xs">
+                      <td className="py-2 pr-3 font-mono text-xs whitespace-nowrap">
                         {quote ? (
-                          <a
-                            href={`/laserquote/imports/${quote.importId}`}
-                            className="text-blue-600 hover:underline"
-                          >
-                            {quote.quoteNumber}
-                          </a>
+                          <span className="inline-flex items-center gap-1.5">
+                            <a
+                              href={`/laserquote/imports/${quote.importId}`}
+                              className="text-blue-600 hover:underline"
+                            >
+                              {quote.quoteNumber}
+                            </a>
+                            <StatusBadge status={quote.status} />
+                          </span>
                         ) : (
                           <span className="text-gray-300">—</span>
                         )}
