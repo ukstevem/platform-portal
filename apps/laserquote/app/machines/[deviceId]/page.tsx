@@ -557,22 +557,34 @@ export default function MachinePage() {
       const turnoverBuckets = new Map<string, number>();
       for (const day of hoursBuckets.keys()) turnoverBuckets.set(day, 0);
 
-      // Walk runs in ascending order; first time we see a confirmed quote,
-      // attribute its full value. Drafts/issued/etc are visible in the runs
-      // table via fetchQuoteMatches but don't count toward turnover.
-      const seenQuotes = new Set<number>();
+      // Mirror the runs table: include any alive quote (drafts and confirmed
+      // alike — fetchQuoteMatches already excludes lost/cancelled). For each
+      // matched quote, count its end-of-cycle runs (READY + >=30s) within the
+      // 30-day window, then attribute totalValue/N to each run's day. The
+      // chart sums those shares per day, so a single quote contributes its
+      // total once across the days its programs actually ran.
+      const runCountByQuote = new Map<number, number>();
       for (const r of rows) {
+        if (r.ended_state !== "READY") continue;
         if ((r.runtime_seconds ?? 0) < REAL_RUN_MIN_S) continue;
         const key = normaliseProgram(r.program);
         if (!key) continue;
-        const match = matches.get(key);
-        if (!match || match.totalValue == null) continue;
-        if (!QUOTE_CONFIRMED_STATUSES.has(match.status)) continue;
-        if (seenQuotes.has(match.quoteId)) continue;
-        seenQuotes.add(match.quoteId);
+        const m = matches.get(key);
+        if (!m || m.totalValue == null) continue;
+        runCountByQuote.set(m.quoteId, (runCountByQuote.get(m.quoteId) ?? 0) + 1);
+      }
+      for (const r of rows) {
+        if (r.ended_state !== "READY") continue;
+        if ((r.runtime_seconds ?? 0) < REAL_RUN_MIN_S) continue;
+        const key = normaliseProgram(r.program);
+        if (!key) continue;
+        const m = matches.get(key);
+        if (!m || m.totalValue == null) continue;
+        const n = runCountByQuote.get(m.quoteId) ?? 1;
+        const share = m.totalValue / n;
         const day = londonDateString(new Date(r.ts));
         if (turnoverBuckets.has(day)) {
-          turnoverBuckets.set(day, turnoverBuckets.get(day)! + match.totalValue);
+          turnoverBuckets.set(day, turnoverBuckets.get(day)! + share);
         }
       }
       setDailyTurnover(
