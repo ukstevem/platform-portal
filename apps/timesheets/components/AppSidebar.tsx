@@ -14,6 +14,7 @@ export function AppSidebar() {
           items: [
             { label: "Weekly Entry", href: "/timesheets/" },
             { label: "Project Hours Report", href: "/timesheets/reports/" },
+            { label: "Variance Deviations", href: "/timesheets/reports/variance/" },
             { label: "Wage Preparation", href: "/timesheets/wages/" },
           ],
         },
