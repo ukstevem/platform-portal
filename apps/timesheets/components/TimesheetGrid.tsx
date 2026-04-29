@@ -19,6 +19,52 @@ const PERSISTENT_ITEMS = [
   { project_item: "SICK-01", line_desc: "Sick" },
 ];
 
+// Project items excluded from the variance comparison. Hours on these
+// days are not "on-site work" so they shouldn't be matched against
+// clocked minutes from the presence system.
+const VARIANCE_EXCLUDED_ITEMS = new Set(["SICK-01", "HOLIDAY-01", "TRAINING-01"]);
+
+type DayPresence = {
+  worked_minutes: number;
+  missed_clock_in: boolean;
+  missed_clock_out: boolean;
+  tap_count: number;
+};
+
+function formatDecimalHours(minutes: number): string {
+  return (minutes / 60).toFixed(2);
+}
+
+function formatSignedDecimalHours(minutes: number): string {
+  if (minutes === 0) return "0.00";
+  const sign = minutes > 0 ? "+" : "−";
+  return `${sign}${(Math.abs(minutes) / 60).toFixed(2)}`;
+}
+
+function formatHM(minutes: number, signed = false): string {
+  const sign = minutes < 0 ? "−" : signed && minutes > 0 ? "+" : "";
+  const abs = Math.abs(minutes);
+  const h = Math.floor(abs / 60);
+  const m = abs % 60;
+  return `${sign}${h}h${String(m).padStart(2, "0")}`;
+}
+
+// Per-day cell colour bands for the Variance row.
+function dayVarianceClass(minutes: number): string {
+  const abs = Math.abs(minutes);
+  if (abs <= 15) return "";
+  if (abs <= 30) return "bg-amber-100 text-amber-800";
+  return "bg-red-100 text-red-800";
+}
+
+// Weekly headline / totals colour bands (slightly looser than per-day).
+function weeklyVarianceClass(minutes: number): string {
+  const abs = Math.abs(minutes);
+  if (abs <= 30) return "";
+  if (abs <= 60) return "text-amber-700";
+  return "text-red-700";
+}
+
 export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
   const { user } = useAuth();
   const weekDates = useMemo(() => getWeekDates(monday), [monday]);
@@ -33,6 +79,7 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
   const savingRef = useRef<Set<string>>(new Set());
   const [approval, setApproval] = useState<{ approved_by: string; approved_at: string } | null>(null);
   const [approving, setApproving] = useState(false);
+  const [presenceByDate, setPresenceByDate] = useState<Map<string, DayPresence>>(new Map());
 
   // Load project items for the add-project picker
   useEffect(() => {
@@ -167,6 +214,45 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
       cancelled = true;
     };
   }, [employee.id, monday, weekISOs]);
+
+  // Load presence (clocked) data for the week from the presence schema's
+  // employees_daily_hours RPC. Read-only consumption — no changes to
+  // presence-owned tables. Filtered client-side to this employee.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase.rpc("employees_daily_hours", {
+        p_start_date: weekISOs[0],
+        p_end_date: weekISOs[6],
+      });
+      if (cancelled) return;
+      if (error || !data) {
+        setPresenceByDate(new Map());
+        return;
+      }
+      const map = new Map<string, DayPresence>();
+      for (const r of data as Array<{
+        employee_id: string;
+        work_date: string;
+        worked_minutes: number | null;
+        missed_clock_in: boolean | null;
+        missed_clock_out: boolean | null;
+        tap_count: number | null;
+      }>) {
+        if (r.employee_id !== employee.id) continue;
+        map.set(r.work_date, {
+          worked_minutes: r.worked_minutes ?? 0,
+          missed_clock_in: r.missed_clock_in ?? false,
+          missed_clock_out: r.missed_clock_out ?? false,
+          tap_count: r.tap_count ?? 0,
+        });
+      }
+      if (!cancelled) setPresenceByDate(map);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [employee.id, weekISOs]);
 
   const saveCell = useCallback(
     async (project_item: string, dateISO: string, hours: number) => {
@@ -401,14 +487,59 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
   }, 0);
   const otNeedsFlagging = thresholdMet && overtime > 0 && totalFlaggedOT < overtime;
 
+  // ---- Variance comparison (timecard cross-check) ----
+  // Per-day clocked minutes from presence; falls back to 0 if no row.
+  const dayClockedMinutes = weekISOs.map(
+    (iso) => presenceByDate.get(iso)?.worked_minutes ?? 0
+  );
+  // Per-day allocated work minutes — excludes SICK/HOLIDAY/TRAINING because
+  // those are not clocked-on-site work.
+  const dayAllocatedMinutes = weekISOs.map((iso) =>
+    rows.reduce((sum, row) => {
+      if (VARIANCE_EXCLUDED_ITEMS.has(row.project_item)) return sum;
+      return sum + Math.round((row.hours[iso] ?? 0) * 60);
+    }, 0)
+  );
+  const dayVarianceMinutes = dayClockedMinutes.map(
+    (c, i) => c - dayAllocatedMinutes[i]
+  );
+  const weeklyClockedMinutes = dayClockedMinutes.reduce((a, b) => a + b, 0);
+  const weeklyAllocatedMinutes = dayAllocatedMinutes.reduce((a, b) => a + b, 0);
+  const weeklyVarianceMinutes = weeklyClockedMinutes - weeklyAllocatedMinutes;
+  const hasAnyTap = weekISOs.some(
+    (iso) => (presenceByDate.get(iso)?.tap_count ?? 0) > 0
+  );
+  const incompleteClocking = weekISOs.some((iso) => {
+    const p = presenceByDate.get(iso);
+    return !!(p && (p.missed_clock_in || p.missed_clock_out));
+  });
+
   const handleApprove = async () => {
     if (!user) return;
     setApproving(true);
+    // Snapshot the variance components when there's any clocking data
+    // for the week. Otherwise null them out (a re-approval against a
+    // week with no taps shouldn't carry stale numbers from a prior
+    // approval, though the unapprove path deletes the row anyway).
+    const variancePayload = hasAnyTap
+      ? {
+          clocked_minutes: weeklyClockedMinutes,
+          allocated_work_minutes: weeklyAllocatedMinutes,
+          variance_minutes: weeklyVarianceMinutes,
+          incomplete_clocking: incompleteClocking,
+        }
+      : {
+          clocked_minutes: null,
+          allocated_work_minutes: null,
+          variance_minutes: null,
+          incomplete_clocking: null,
+        };
     const { error } = await supabase.from("timesheet_approvals").upsert(
       {
         employee_id: employee.id,
         week_start: weekISOs[0],
         approved_by: user.id,
+        ...variancePayload,
       },
       { onConflict: "employee_id,week_start" }
     );
@@ -505,39 +636,56 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
 
       {/* Approval status */}
       <div className="border rounded px-4 py-3 flex items-center justify-between bg-white">
-        {approval ? (
-          <div className="flex items-center gap-3">
-            <span className="inline-flex items-center gap-1.5 text-sm font-medium text-green-700">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-              Approved
-            </span>
-            <span className="text-xs text-gray-500">
-              {new Date(approval.approved_at).toLocaleDateString("en-GB", {
-                day: "numeric", month: "short", year: "numeric",
-                hour: "2-digit", minute: "2-digit",
-              })}
-            </span>
-            <button
-              type="button"
-              onClick={handleUnapprove}
-              disabled={approving}
-              className="text-xs text-red-500 hover:text-red-700 underline cursor-pointer disabled:opacity-50"
-            >
-              Remove approval
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-500">Not yet approved</span>
-            {otNeedsFlagging && (
-              <span className="text-xs text-amber-600 font-medium">
-                — Define O/T job(s): {overtime}h overtime, {totalFlaggedOT}h flagged
+        <div className="flex flex-col gap-1">
+          {approval ? (
+            <div className="flex items-center gap-3">
+              <span className="inline-flex items-center gap-1.5 text-sm font-medium text-green-700">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                Approved
               </span>
-            )}
-          </div>
-        )}
+              <span className="text-xs text-gray-500">
+                {new Date(approval.approved_at).toLocaleDateString("en-GB", {
+                  day: "numeric", month: "short", year: "numeric",
+                  hour: "2-digit", minute: "2-digit",
+                })}
+              </span>
+              <button
+                type="button"
+                onClick={handleUnapprove}
+                disabled={approving}
+                className="text-xs text-red-500 hover:text-red-700 underline cursor-pointer disabled:opacity-50"
+              >
+                Remove approval
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-gray-500">Not yet approved</span>
+              {otNeedsFlagging && (
+                <span className="text-xs text-amber-600 font-medium">
+                  — Define O/T job(s): {overtime}h overtime, {totalFlaggedOT}h flagged
+                </span>
+              )}
+            </div>
+          )}
+          {hasAnyTap && (
+            <div className="text-xs text-gray-600">
+              Variance:{" "}
+              <span className={`font-medium ${weeklyVarianceClass(weeklyVarianceMinutes) || "text-gray-700"}`}>
+                {formatHM(weeklyVarianceMinutes, true)}
+              </span>{" "}
+              over {formatDecimalHours(weeklyClockedMinutes)}h clocked,{" "}
+              {formatDecimalHours(weeklyAllocatedMinutes)}h allocated
+              {incompleteClocking && (
+                <span className="text-amber-600 ml-2" title="At least one day in this week had a missed clock-in or clock-out">
+                  ⚠ incomplete clocking
+                </span>
+              )}
+            </div>
+          )}
+        </div>
         {!approval && (
           <button
             type="button"
@@ -687,6 +835,73 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
               </td>
               <td className="border"></td>
             </tr>
+
+            {/* Clocked + Variance rows — only when employee clocked at all this week */}
+            {hasAnyTap && (
+              <>
+                <tr className="bg-gray-50 text-xs">
+                  <td className="border px-3 py-1.5 text-right text-gray-600">
+                    Clocked (presence)
+                    {incompleteClocking && (
+                      <span className="text-amber-600 ml-1" title="Missed clock-in or clock-out on one or more days">⚠</span>
+                    )}
+                  </td>
+                  {weekISOs.map((iso, i) => {
+                    const p = presenceByDate.get(iso);
+                    const mins = dayClockedMinutes[i];
+                    const dayMissed = !!(p && (p.missed_clock_in || p.missed_clock_out));
+                    return (
+                      <td
+                        key={iso}
+                        className={`border px-2 py-1.5 text-center text-gray-700 ${dayMissed ? "bg-amber-50" : ""}`}
+                        title={
+                          dayMissed
+                            ? `${formatHM(mins)} (incomplete: ${p?.missed_clock_in ? "missed clock-in" : ""}${p?.missed_clock_in && p?.missed_clock_out ? ", " : ""}${p?.missed_clock_out ? "missed clock-out" : ""})`
+                            : formatHM(mins)
+                        }
+                      >
+                        {mins > 0 ? formatDecimalHours(mins) : ""}
+                      </td>
+                    );
+                  })}
+                  <td className="border px-2 py-1.5 text-center font-medium text-gray-700">
+                    {weeklyClockedMinutes > 0 ? formatDecimalHours(weeklyClockedMinutes) : ""}
+                  </td>
+                  <td className="border"></td>
+                </tr>
+                <tr className="text-xs">
+                  <td className="border px-3 py-1.5 text-right text-gray-600">
+                    Variance (clocked − allocated)
+                  </td>
+                  {dayVarianceMinutes.map((v, i) => {
+                    const cls = dayVarianceClass(v);
+                    const allocated = dayAllocatedMinutes[i];
+                    const clocked = dayClockedMinutes[i];
+                    const showCell = clocked > 0 || allocated > 0;
+                    return (
+                      <td
+                        key={weekISOs[i]}
+                        className={`border px-2 py-1.5 text-center ${cls}`}
+                        title={
+                          showCell
+                            ? `Clocked ${formatHM(clocked)}, Allocated ${formatHM(allocated)}, Variance ${formatHM(v, true)}`
+                            : ""
+                        }
+                      >
+                        {showCell ? formatSignedDecimalHours(v) : ""}
+                      </td>
+                    );
+                  })}
+                  <td
+                    className={`border px-2 py-1.5 text-center font-bold ${weeklyVarianceClass(weeklyVarianceMinutes)}`}
+                    title={`Clocked ${formatHM(weeklyClockedMinutes)}, Allocated ${formatHM(weeklyAllocatedMinutes)}, Variance ${formatHM(weeklyVarianceMinutes, true)}`}
+                  >
+                    {formatSignedDecimalHours(weeklyVarianceMinutes)}
+                  </td>
+                  <td className="border"></td>
+                </tr>
+              </>
+            )}
           </tbody>
         </table>
       </div>
