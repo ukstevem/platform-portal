@@ -78,6 +78,7 @@ type Import = {
   sheet_price: number | null;
   material_rate: number | null;
   premium: boolean;
+  free_issue: boolean;
   rem_charge: boolean;
   created_at: string;
 };
@@ -190,8 +191,27 @@ export default function ImportDetailPage() {
           <p className="font-medium">{totalParts}</p>
         </div>
         <div>
-          <p className="text-xs text-gray-500">Premium</p>
-          <p className="font-medium">{imp.premium ? "Yes" : "No"}</p>
+          <p className="text-xs text-gray-500">Flags</p>
+          <div className="flex flex-wrap gap-1.5 mt-0.5">
+            {imp.premium && (
+              <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+                Premium
+              </span>
+            )}
+            {imp.free_issue && (
+              <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                Free Issue
+              </span>
+            )}
+            {imp.rem_charge && (
+              <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-sky-100 text-sky-800">
+                Remnant Charge
+              </span>
+            )}
+            {!imp.premium && !imp.free_issue && !imp.rem_charge && (
+              <span className="text-sm text-gray-400">None</span>
+            )}
+          </div>
         </div>
         <div>
           <p className="text-xs text-gray-500">Sheet Price</p>
