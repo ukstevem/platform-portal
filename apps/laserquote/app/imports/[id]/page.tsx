@@ -92,6 +92,7 @@ export default function ImportDetailPage() {
   const [loading, setLoading] = useState(true);
   const [expandedProgs, setExpandedProgs] = useState<Set<number>>(new Set());
   const [savingRunCount, setSavingRunCount] = useState<number | null>(null);
+  const [rates, setRates] = useState<Map<string, number>>(new Map());
 
   const SERVICE_PREFIX = "/laserquote/api/service";
 
@@ -127,6 +128,17 @@ export default function ImportDetailPage() {
       setImp(impRes.data as Import | null);
       setPrograms((progRes.data as Program[] | null) ?? []);
       setQuotes((quoteRes.data as Quote[] | null) ?? []);
+
+      const { data: rateData } = await supabase
+        .from("laser_rate")
+        .select("key, value")
+        .like("key", "rate_%");
+      const m = new Map<string, number>();
+      for (const r of (rateData as { key: string; value: number }[] | null) ?? []) {
+        m.set(r.key, Number(r.value));
+      }
+      setRates(m);
+
       setLoading(false);
     })();
   }, [user, id]);
@@ -167,6 +179,36 @@ export default function ImportDetailPage() {
   const fmt = (v: number | null) => (v != null ? `£${v.toFixed(2)}` : "—");
   const totalParts = programs.reduce((sum, p) => sum + (p.parts?.length ?? 0), 0);
   const totalSheets = programs.reduce((sum, p) => sum + p.sheet_count, 0);
+
+  // Resolve the default material rate (£/tonne) for the import's material+grade.
+  const defaultMaterialRate = (() => {
+    const mat = imp.material;
+    const grade = imp.grade?.toUpperCase().trim();
+    let key: string | null = null;
+    if (mat === "STAINLESS") {
+      if (grade === "304") key = "rate_304";
+      else if (grade === "316") key = "rate_316";
+    } else if (mat === "AL") key = "rate_al";
+    else if (mat === "MILD") key = "rate_mild";
+    return key ? rates.get(key) ?? null : null;
+  })();
+
+  // Display values for Sheet Price / Material Rate cells.
+  // Free issue → "Not Applicable" (no material was charged).
+  // Override set → the overridden value, suffixed "(override)".
+  // Otherwise → the default rate from laser_rate, suffixed "(default)".
+  const sheetPriceDisplay: { text: string; muted?: boolean } = imp.free_issue
+    ? { text: "Not Applicable", muted: true }
+    : imp.sheet_price != null
+      ? { text: `${fmt(imp.sheet_price)} (override)` }
+      : { text: "—", muted: true };
+  const materialRateDisplay: { text: string; muted?: boolean } = imp.free_issue
+    ? { text: "Not Applicable", muted: true }
+    : imp.material_rate != null
+      ? { text: `£${imp.material_rate}/T (override)` }
+      : defaultMaterialRate != null
+        ? { text: `£${defaultMaterialRate}/T (default)`, muted: true }
+        : { text: "—", muted: true };
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
@@ -215,11 +257,15 @@ export default function ImportDetailPage() {
         </div>
         <div>
           <p className="text-xs text-gray-500">Sheet Price</p>
-          <p className="font-medium">{imp.sheet_price != null ? fmt(imp.sheet_price) : "—"}</p>
+          <p className={`font-medium text-sm ${sheetPriceDisplay.muted ? "text-gray-400" : ""}`}>
+            {sheetPriceDisplay.text}
+          </p>
         </div>
         <div>
           <p className="text-xs text-gray-500">Material Rate</p>
-          <p className="font-medium">{imp.material_rate != null ? `£${imp.material_rate}/T` : "—"}</p>
+          <p className={`font-medium text-sm ${materialRateDisplay.muted ? "text-gray-400" : ""}`}>
+            {materialRateDisplay.text}
+          </p>
         </div>
         <div>
           <p className="text-xs text-gray-500">Uploaded</p>
