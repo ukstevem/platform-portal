@@ -136,11 +136,12 @@ async function fetchQuoteMatches(programNames: string[]): Promise<Map<string, Qu
 
 // Colours for the timeline. READY is intentionally omitted — it's the default
 // state, so absence-of-colour communicates "running normally" and lets the
-// problem states stand out.
+// problem states stand out. STOPPED uses near-black so it's distinguishable
+// from INTERRUPTED's red at a glance.
 const EXEC_COLOURS: Record<string, string> = {
   ACTIVE: "#16a34a",
   FEED_HOLD: "#f59e0b",
-  STOPPED: "#dc2626",
+  STOPPED: "#1f2937",
   INTERRUPTED: "#dc2626",
 };
 
@@ -148,7 +149,7 @@ const EXEC_BADGE: Record<string, string> = {
   ACTIVE: "bg-green-100 text-green-800",
   READY: "bg-blue-100 text-blue-800",
   FEED_HOLD: "bg-amber-100 text-amber-800",
-  STOPPED: "bg-red-100 text-red-800",
+  STOPPED: "bg-gray-800 text-white",
   INTERRUPTED: "bg-red-100 text-red-800",
 };
 
