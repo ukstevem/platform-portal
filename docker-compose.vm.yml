@@ -1,0 +1,228 @@
+# Portainer-on-VM deployment: builds images from this repo on the VM itself.
+# Distinct from docker-compose.deploy.yml, which pulls pre-built images from ghcr.io
+# for the Raspberry Pi path. Do not mix the two on the same host.
+
+services:
+  gateway:
+    build:
+      context: ./docker/nginx
+      dockerfile: Dockerfile.prod
+    image: platform-portal/gateway:vm
+    container_name: platform_gateway
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_PORT:-3000}:80"
+    depends_on:
+      - portal
+      - jobcards
+      - documents
+      - timesheets
+      - operations
+      - scanner
+      - laserquote
+      - assembly-viewer
+      - nesting
+
+  portal:
+    build:
+      context: .
+      dockerfile: docker/node/Dockerfile.prod
+      target: runner
+      args:
+        APP_NAME: portal
+        APP_PORT: "3000"
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_DOC_GATEWAY_BASE_URL: ${NEXT_PUBLIC_DOC_GATEWAY_BASE_URL}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+        NEXT_PUBLIC_DOC_SERVICE_URL: ${NEXT_PUBLIC_DOC_SERVICE_URL}
+        NEXT_PUBLIC_LASER_QUOTE_SERVICE_URL: ${NEXT_PUBLIC_LASER_QUOTE_SERVICE_URL}
+    image: platform-portal/portal:vm
+    container_name: platform_portal
+    restart: unless-stopped
+    environment:
+      - APP_NAME=portal
+      - PORT=3000
+
+  jobcards:
+    build:
+      context: .
+      dockerfile: docker/node/Dockerfile.prod
+      target: runner
+      args:
+        APP_NAME: jobcards
+        APP_PORT: "3001"
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_DOC_GATEWAY_BASE_URL: ${NEXT_PUBLIC_DOC_GATEWAY_BASE_URL}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+        NEXT_PUBLIC_DOC_SERVICE_URL: ${NEXT_PUBLIC_DOC_SERVICE_URL}
+        NEXT_PUBLIC_LASER_QUOTE_SERVICE_URL: ${NEXT_PUBLIC_LASER_QUOTE_SERVICE_URL}
+    image: platform-portal/jobcards:vm
+    container_name: platform_jobcards
+    restart: unless-stopped
+    environment:
+      - APP_NAME=jobcards
+      - PORT=3001
+
+  documents:
+    build:
+      context: .
+      dockerfile: docker/node/Dockerfile.prod
+      target: runner
+      args:
+        APP_NAME: documents
+        APP_PORT: "3002"
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_DOC_GATEWAY_BASE_URL: ${NEXT_PUBLIC_DOC_GATEWAY_BASE_URL}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+        NEXT_PUBLIC_DOC_SERVICE_URL: ${NEXT_PUBLIC_DOC_SERVICE_URL}
+        NEXT_PUBLIC_LASER_QUOTE_SERVICE_URL: ${NEXT_PUBLIC_LASER_QUOTE_SERVICE_URL}
+    image: platform-portal/documents:vm
+    container_name: platform_documents
+    restart: unless-stopped
+    environment:
+      - APP_NAME=documents
+      - PORT=3002
+      - DOC_NAS_ROOT=/data/input
+    volumes:
+      - ${HOST_DOC_ROOT:-/tmp}:/data/input:ro
+
+  timesheets:
+    build:
+      context: .
+      dockerfile: docker/node/Dockerfile.prod
+      target: runner
+      args:
+        APP_NAME: timesheets
+        APP_PORT: "3003"
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_DOC_GATEWAY_BASE_URL: ${NEXT_PUBLIC_DOC_GATEWAY_BASE_URL}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+        NEXT_PUBLIC_DOC_SERVICE_URL: ${NEXT_PUBLIC_DOC_SERVICE_URL}
+        NEXT_PUBLIC_LASER_QUOTE_SERVICE_URL: ${NEXT_PUBLIC_LASER_QUOTE_SERVICE_URL}
+    image: platform-portal/timesheets:vm
+    container_name: platform_timesheets
+    restart: unless-stopped
+    environment:
+      - APP_NAME=timesheets
+      - PORT=3003
+
+  operations:
+    build:
+      context: .
+      dockerfile: docker/node/Dockerfile.prod
+      target: runner
+      args:
+        APP_NAME: operations
+        APP_PORT: "3004"
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_DOC_GATEWAY_BASE_URL: ${NEXT_PUBLIC_DOC_GATEWAY_BASE_URL}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+        NEXT_PUBLIC_DOC_SERVICE_URL: ${NEXT_PUBLIC_DOC_SERVICE_URL}
+        NEXT_PUBLIC_LASER_QUOTE_SERVICE_URL: ${NEXT_PUBLIC_LASER_QUOTE_SERVICE_URL}
+    image: platform-portal/operations:vm
+    container_name: platform_operations
+    restart: unless-stopped
+    environment:
+      - APP_NAME=operations
+      - PORT=3004
+
+  scanner:
+    build:
+      context: .
+      dockerfile: docker/node/Dockerfile.prod
+      target: runner
+      args:
+        APP_NAME: scanner
+        APP_PORT: "3005"
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_DOC_GATEWAY_BASE_URL: ${NEXT_PUBLIC_DOC_GATEWAY_BASE_URL}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+        NEXT_PUBLIC_DOC_SERVICE_URL: ${NEXT_PUBLIC_DOC_SERVICE_URL}
+        NEXT_PUBLIC_LASER_QUOTE_SERVICE_URL: ${NEXT_PUBLIC_LASER_QUOTE_SERVICE_URL}
+    image: platform-portal/scanner:vm
+    container_name: platform_scanner
+    restart: unless-stopped
+    environment:
+      - APP_NAME=scanner
+      - PORT=3005
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SECRET_KEY}
+      - DOC_SERVICE_URL=${DOC_SERVICE_URL:-http://10.0.0.x:80}
+
+  laserquote:
+    build:
+      context: .
+      dockerfile: docker/node/Dockerfile.prod
+      target: runner
+      args:
+        APP_NAME: laserquote
+        APP_PORT: "3006"
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_DOC_GATEWAY_BASE_URL: ${NEXT_PUBLIC_DOC_GATEWAY_BASE_URL}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+        NEXT_PUBLIC_DOC_SERVICE_URL: ${NEXT_PUBLIC_DOC_SERVICE_URL}
+        NEXT_PUBLIC_LASER_QUOTE_SERVICE_URL: ${NEXT_PUBLIC_LASER_QUOTE_SERVICE_URL}
+    image: platform-portal/laserquote:vm
+    container_name: platform_laserquote
+    restart: unless-stopped
+    environment:
+      - APP_NAME=laserquote
+      - PORT=3006
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SECRET_KEY}
+      - LASER_QUOTE_SERVICE_URL=${LASER_QUOTE_SERVICE_URL:-http://10.0.0.x:8090}
+
+  assembly-viewer:
+    build:
+      context: .
+      dockerfile: docker/node/Dockerfile.prod
+      target: runner-standalone
+      args:
+        APP_NAME: assembly-viewer
+        APP_PORT: "3007"
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_DOC_GATEWAY_BASE_URL: ${NEXT_PUBLIC_DOC_GATEWAY_BASE_URL}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+        NEXT_PUBLIC_DOC_SERVICE_URL: ${NEXT_PUBLIC_DOC_SERVICE_URL}
+        NEXT_PUBLIC_LASER_QUOTE_SERVICE_URL: ${NEXT_PUBLIC_LASER_QUOTE_SERVICE_URL}
+    image: platform-portal/assembly-viewer:vm
+    container_name: platform_assembly_viewer
+    restart: unless-stopped
+    environment:
+      - APP_NAME=assembly-viewer
+      - PORT=3007
+      - DOC_SERVICE_URL=${DOC_SERVICE_URL:-http://10.0.0.75:80}
+
+  nesting:
+    build:
+      context: .
+      dockerfile: docker/node/Dockerfile.prod
+      target: runner
+      args:
+        APP_NAME: nesting
+        APP_PORT: "3008"
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_DOC_GATEWAY_BASE_URL: ${NEXT_PUBLIC_DOC_GATEWAY_BASE_URL}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+        NEXT_PUBLIC_DOC_SERVICE_URL: ${NEXT_PUBLIC_DOC_SERVICE_URL}
+        NEXT_PUBLIC_LASER_QUOTE_SERVICE_URL: ${NEXT_PUBLIC_LASER_QUOTE_SERVICE_URL}
+    image: platform-portal/nesting:vm
+    container_name: platform_nesting
+    restart: unless-stopped
+    environment:
+      - APP_NAME=nesting
+      - PORT=3008
+      - NESTING_SERVICE_URL=${NESTING_SERVICE_URL:-http://10.0.0.74:8001}
+      - DOC_SERVICE_URL=${DOC_SERVICE_URL:-http://10.0.0.74:3000}
+
+networks:
+  default:
+    name: platform_net
+    external: true
