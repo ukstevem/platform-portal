@@ -88,7 +88,7 @@ export default function PortalHome() {
           Platform Portal
         </h1>
         <p className="text-gray-600">Sign in to access the PSS platform</p>
-        <AuthButton redirectTo="/" />
+        <AuthButton redirectTo="/auth/callback" />
       </div>
     );
   }
