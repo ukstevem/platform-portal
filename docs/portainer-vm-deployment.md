@@ -14,6 +14,7 @@ This is the **VM path**: Portainer running on a Proxmox VM clones this repo and 
 ## Prerequisites
 
 - Proxmox VM running Linux (amd64) with Docker Engine + Compose v2.
+- **Disk: at least 60 GB total, with 50+ GB free at deploy time.** A from-scratch build of all 9 apps peaks at ~20–30 GB transient (pnpm store, layered build outputs, intermediate images). 15–20 GB VMs will fail with `no space left on device` mid-build. Steady state after a successful build is ~10–15 GB.
 - Portainer CE/BE installed on the VM.
 - Outbound HTTPS from the VM to `github.com` (for `git clone`) and `registry-1.docker.io` (for the `node:20-alpine` and `nginx:1.27-alpine` base layers).
 - The shared Docker network exists on the VM:
@@ -110,6 +111,7 @@ Before first use, run these in the Supabase SQL editor (in order):
 
 ## Troubleshooting
 
+- **`failed to extract layer ... no space left on device`** — VM disk is too small. Default Ubuntu Server installs are often 15–20 GB; a full build needs 50+ GB free. Either grow the Proxmox virtual disk and `growpart` + `pvresize` + `lvextend` + `resize2fs` inside the VM, or check if the LVM VG already has free space (`sudo vgs`) and `lvextend -l +100%FREE` to claim it for free.
 - **First build fails on `pnpm install`** — check the VM has outbound HTTPS to `registry.npmjs.org`. If it goes through a proxy, configure Docker daemon proxy settings.
 - **`network platform_net not found`** — run `docker network create platform_net` on the VM, then redeploy.
 - **`NEXT_PUBLIC_*` value didn't change after redeploy** — these are baked at build time. Tick **Re-build image** in the redeploy dialog, not just **Re-pull image**.
