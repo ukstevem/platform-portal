@@ -54,6 +54,8 @@ export async function POST(req: NextRequest) {
     premium,
     free_issue: freeIssue,
     rem_charge: remCharge,
+    incoterms: incoterms || "EXW",
+    lead_time: leadTime || null,
   });
 
   if (dbError) {
