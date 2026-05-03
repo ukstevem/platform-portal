@@ -16,7 +16,7 @@ type ScanJob = {
   file_name: string;
   status: string;
   type_code: string | null;
-  asset_code: string | null;
+  subject_code: string | null;
   doc_code: string | null;
   period: string | null;
   document_type: string | null;
@@ -72,7 +72,7 @@ export default function HistoryPage() {
     const statuses = new Set<string>();
     jobs.forEach((j) => {
       if (j.type_code) types.add(j.type_code);
-      if (j.asset_code) assets.add(j.asset_code);
+      if (j.subject_code) assets.add(j.subject_code);
       if (j.doc_code) docs.add(j.doc_code);
       statuses.add(j.status);
     });
@@ -88,14 +88,14 @@ export default function HistoryPage() {
   const filtered = useMemo(() => {
     return jobs.filter((j) => {
       if (typeFilter && j.type_code !== typeFilter) return false;
-      if (assetFilter && j.asset_code !== assetFilter) return false;
+      if (assetFilter && j.subject_code !== assetFilter) return false;
       if (docFilter && j.doc_code !== docFilter) return false;
       if (statusFilter && j.status !== statusFilter) return false;
       if (lifecycleFilter && (j.lifecycle_status ?? "active") !== lifecycleFilter) return false;
       if (search) {
         const q = search.toLowerCase();
         const searchable = [
-          j.file_name, j.type_code, j.asset_code, j.doc_code,
+          j.file_name, j.type_code, j.subject_code, j.doc_code,
           j.document_type, j.filed_path, j.period,
         ].filter(Boolean).join(" ").toLowerCase();
         if (!searchable.includes(q)) return false;
@@ -249,7 +249,7 @@ export default function HistoryPage() {
                   <td className="py-2 pr-4">
                     <StatusBadge status={job.status} errorCode={job.error_code} error={job.error_message} />
                   </td>
-                  <td className="py-2 pr-4 font-mono text-xs font-bold">{job.asset_code ?? "—"}</td>
+                  <td className="py-2 pr-4 font-mono text-xs font-bold">{job.subject_code ?? "—"}</td>
                   <td className="py-2 pr-4 text-xs">
                     {job.doc_code
                       ? (docDefs.find((d) => d.doc_code === job.doc_code)?.doc_name ?? job.doc_code)
@@ -308,7 +308,7 @@ export default function HistoryPage() {
           jobId={refileJob.id}
           errorCode={refileJob.error_code}
           initialTypeCode={refileJob.type_code ?? (refileJob.override_metadata?.type_code as string) ?? null}
-          initialAssetCode={refileJob.asset_code ?? (refileJob.override_metadata?.asset_code as string) ?? null}
+          initialSubjectCode={refileJob.subject_code ?? (refileJob.override_metadata?.subject_code as string) ?? null}
           initialDocCode={refileJob.doc_code ?? (refileJob.override_metadata?.doc_code as string) ?? null}
           initialPeriod={refileJob.period ?? (refileJob.override_metadata?.period as string) ?? null}
           onClose={() => setRefileJob(null)}

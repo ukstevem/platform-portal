@@ -15,7 +15,7 @@ type ScanJob = {
   file_name: string;
   status: string;
   type_code: string | null;
-  asset_code: string | null;
+  subject_code: string | null;
   doc_code: string | null;
   period: string | null;
   document_type: string | null;
@@ -37,7 +37,7 @@ export function RecentJobs() {
   const fetchJobs = async () => {
     const { data } = await supabase
       .from("document_incoming_scan")
-      .select("id, file_name, status, type_code, asset_code, doc_code, period, document_type, filed_path, error_code, error_message, lifecycle_status, override_metadata, created_at")
+      .select("id, file_name, status, type_code, subject_code, doc_code, period, document_type, filed_path, error_code, error_message, lifecycle_status, override_metadata, created_at")
       .order("created_at", { ascending: false })
       .limit(10);
     setJobs(data ?? []);
@@ -103,7 +103,7 @@ export function RecentJobs() {
                 <td className="py-2 pr-4">
                   <StatusBadge status={job.status} errorCode={job.error_code} error={job.error_message} />
                 </td>
-                <td className="py-2 pr-4 font-mono text-xs font-bold">{job.asset_code ?? "—"}</td>
+                <td className="py-2 pr-4 font-mono text-xs font-bold">{job.subject_code ?? "—"}</td>
                 <td className="py-2 pr-4 text-xs">
                   {job.doc_code
                     ? (docDefs.find((d) => d.doc_code === job.doc_code)?.doc_name ?? job.doc_code)
@@ -160,7 +160,7 @@ export function RecentJobs() {
           jobId={refileJob.id}
           errorCode={refileJob.error_code}
           initialTypeCode={refileJob.type_code ?? (refileJob.override_metadata?.type_code as string) ?? null}
-          initialAssetCode={refileJob.asset_code ?? (refileJob.override_metadata?.asset_code as string) ?? null}
+          initialSubjectCode={refileJob.subject_code ?? (refileJob.override_metadata?.subject_code as string) ?? null}
           initialDocCode={refileJob.doc_code ?? (refileJob.override_metadata?.doc_code as string) ?? null}
           initialPeriod={refileJob.period ?? (refileJob.override_metadata?.period as string) ?? null}
           onClose={() => setRefileJob(null)}

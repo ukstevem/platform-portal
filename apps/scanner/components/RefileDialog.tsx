@@ -6,7 +6,7 @@ import { supabase } from "@platform/supabase/client";
 const DOC_SERVICE_URL = process.env.NEXT_PUBLIC_DOC_SERVICE_URL ?? "";
 
 type FilingRule = { type_code: string; document_type: string };
-type Asset = { asset_code: string; asset_name: string };
+type Asset = { subject_code: string; asset_name: string };
 type DocDef = { doc_code: string; doc_name: string; type_code: string; meta_required: boolean };
 type MetaField = { field_name: string; field_label: string; field_type: string; required: boolean; sort_order: number };
 type Supplier = { id: string; name: string };
@@ -16,7 +16,7 @@ type Props = {
   jobId: string;
   errorCode?: string | null;
   initialTypeCode: string | null;
-  initialAssetCode: string | null;
+  initialSubjectCode: string | null;
   initialDocCode: string | null;
   initialPeriod: string | null;
   onClose: () => void;
@@ -42,14 +42,14 @@ export function RefileDialog({
   jobId,
   errorCode,
   initialTypeCode,
-  initialAssetCode,
+  initialSubjectCode,
   initialDocCode,
   initialPeriod,
   onClose,
   onRefiled,
 }: Props) {
   const [typeCode, setTypeCode] = useState(initialTypeCode ?? "");
-  const [assetCode, setAssetCode] = useState(initialAssetCode ?? "");
+  const [subjectCode, setSubjectCode] = useState(initialSubjectCode ?? "");
   const [docCode, setDocCode] = useState(initialDocCode ?? "");
   const [period, setPeriod] = useState(initialPeriod ?? "");
   const [skipDuplicate, setSkipDuplicate] = useState(false);
@@ -87,10 +87,10 @@ export function RefileDialog({
       .then(({ data }) => setFilingRules(data ?? []));
 
     supabase
-      .from("asset_register")
-      .select("asset_code, asset_name")
+      .from("subject_register")
+      .select("subject_code, asset_name")
       .eq("active", true)
-      .order("asset_code")
+      .order("subject_code")
       .then(({ data }) => setAssets(data ?? []));
 
     supabase
@@ -145,19 +145,19 @@ export function RefileDialog({
 
   // Query filed periods when asset/doc/type change
   const fetchFiledPeriods = useCallback(async () => {
-    if (!assetCode || !docCode) {
+    if (!subjectCode || !docCode) {
       setFiledPeriods([]);
       return;
     }
     const { data } = await supabase
       .from("document_incoming_scan")
       .select("period")
-      .eq("asset_code", assetCode)
+      .eq("subject_code", subjectCode)
       .eq("doc_code", docCode)
       .eq("status", "filed")
       .not("period", "is", null);
     setFiledPeriods((data ?? []).map((r) => r.period as string));
-  }, [assetCode, docCode]);
+  }, [subjectCode, docCode]);
 
   useEffect(() => {
     fetchFiledPeriods();
@@ -216,7 +216,7 @@ export function RefileDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type_code: typeCode,
-          asset_code: assetCode,
+          subject_code: subjectCode,
           doc_code: docCode,
           period,
           skip_duplicate_check: skipDuplicate,
@@ -307,17 +307,17 @@ export function RefileDialog({
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Asset</label>
             <select
-              value={assetCode}
+              value={subjectCode}
               onChange={(e) => {
-                setAssetCode(e.target.value);
+                setSubjectCode(e.target.value);
                 setPeriod("");
               }}
               className="w-full border rounded px-3 py-2 text-sm"
             >
               <option value="">Select asset...</option>
               {assets.map((a) => (
-                <option key={a.asset_code} value={a.asset_code}>
-                  {a.asset_code} — {a.asset_name}
+                <option key={a.subject_code} value={a.subject_code}>
+                  {a.subject_code} — {a.asset_name}
                 </option>
               ))}
             </select>
@@ -499,7 +499,7 @@ export function RefileDialog({
           </button>
           <button
             onClick={handleSubmit}
-            disabled={submitting || !typeCode || !assetCode || !docCode || !period || !hasRequiredMeta}
+            disabled={submitting || !typeCode || !subjectCode || !docCode || !period || !hasRequiredMeta}
             className="px-4 py-2 text-sm text-white rounded disabled:opacity-50"
             style={{ backgroundColor: "var(--pss-navy)" }}
           >

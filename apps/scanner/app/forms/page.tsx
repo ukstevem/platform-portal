@@ -8,7 +8,7 @@ import { supabase } from "@platform/supabase/client";
 
 type Asset = {
   id: number;
-  asset_code: string;
+  subject_code: string;
   asset_name: string;
   category: string;
   location: string | null;
@@ -71,10 +71,10 @@ export default function FormsPage() {
 
   const fetchAssets = useCallback(async () => {
     const { data } = await supabase
-      .from("asset_register")
-      .select("id, asset_code, asset_name, category, location, doc_code, active")
+      .from("subject_register")
+      .select("id, subject_code, asset_name, category, location, doc_code, active")
       .like("category", "%-form")
-      .order("asset_code");
+      .order("subject_code");
     setAssets(data ?? []);
     setLoading(false);
   }, []);
@@ -122,7 +122,7 @@ export default function FormsPage() {
     if (filter) {
       const q = filter.toLowerCase();
       return (
-        a.asset_code.toLowerCase().includes(q) ||
+        a.subject_code.toLowerCase().includes(q) ||
         a.asset_name.toLowerCase().includes(q) ||
         (a.location ?? "").toLowerCase().includes(q) ||
         (a.doc_code ?? "").toLowerCase().includes(q)
@@ -154,9 +154,9 @@ export default function FormsPage() {
 
   const getNextSeq = (prefix: string): string => {
     const existing = assets
-      .filter((a) => a.asset_code.startsWith(prefix + "-"))
+      .filter((a) => a.subject_code.startsWith(prefix + "-"))
       .map((a) => {
-        const parts = a.asset_code.split("-");
+        const parts = a.subject_code.split("-");
         return parseInt(parts[parts.length - 1], 10);
       })
       .filter((n) => !isNaN(n));
@@ -164,14 +164,14 @@ export default function FormsPage() {
     return String(max + 1).padStart(3, "0");
   };
 
-  const generatedAssetCode = area && activeDocCode
+  const generatedSubjectCode = area && activeDocCode
     ? `${area}-${activeDocCode}-${getNextSeq(`${area}-${activeDocCode}`)}`
     : "";
 
   const generatedCategory = area ? `${area.toLowerCase()}-form` : "";
 
-  const qrPreview = typeCode && generatedAssetCode && activeDocCode
-    ? `${typeCode}|${generatedAssetCode}|${activeDocCode}`
+  const qrPreview = typeCode && generatedSubjectCode && activeDocCode
+    ? `${typeCode}|${generatedSubjectCode}|${activeDocCode}`
     : "";
 
   const resetForm = () => {
@@ -237,8 +237,8 @@ export default function FormsPage() {
     }
 
     // Create form asset
-    const { error } = await supabase.from("asset_register").insert({
-      asset_code: generatedAssetCode,
+    const { error } = await supabase.from("subject_register").insert({
+      subject_code: generatedSubjectCode,
       asset_name: formName,
       category: generatedCategory,
       location: location || null,
@@ -275,10 +275,10 @@ export default function FormsPage() {
       // @ts-expect-error - qrcode global from CDN
       const qr = qrcode(0, "M");
       const docDef = docDefs.find((d) => d.doc_code === qrDocCode);
-      const tc = docDef?.type_code ?? qrAsset.asset_code.split("-")[0];
+      const tc = docDef?.type_code ?? qrAsset.subject_code.split("-")[0];
       const content = qrDocCode
-        ? `${tc}|${qrAsset.asset_code}|${qrDocCode}`
-        : qrAsset.asset_code;
+        ? `${tc}|${qrAsset.subject_code}|${qrDocCode}`
+        : qrAsset.subject_code;
 
       qr.addData(content);
       qr.make();
@@ -303,8 +303,8 @@ export default function FormsPage() {
       ctx.font = "bold 11px monospace";
       ctx.textAlign = "center";
       const label = qrDocCode
-        ? `${qrAsset.asset_code} | ${qrDocCode}`
-        : qrAsset.asset_code;
+        ? `${qrAsset.subject_code} | ${qrDocCode}`
+        : qrAsset.subject_code;
       ctx.fillText(label, canvas.width / 2, size + padding + 20);
 
       if (qrDocCode) {
@@ -321,14 +321,14 @@ export default function FormsPage() {
     if (!canvas || !qrAsset) return;
     const link = document.createElement("a");
     const suffix = qrDocCode ? `_${qrDocCode}` : "";
-    link.download = `${qrAsset.asset_code}${suffix}.png`;
+    link.download = `${qrAsset.subject_code}${suffix}.png`;
     link.href = canvas.toDataURL("image/png");
     link.click();
   };
 
   const applicableDocDefs = qrAsset
     ? docDefs.filter((d) => {
-        const prefix = qrAsset.asset_code.split("-")[0];
+        const prefix = qrAsset.subject_code.split("-")[0];
         return !d.category || d.category === qrAsset.category || d.type_code === prefix;
       })
     : [];
@@ -482,7 +482,7 @@ export default function FormsPage() {
               <strong>Similar form already exists:</strong>{" "}
               <span className="font-mono">{existingMatch.doc_code}</span> — {existingMatch.doc_name}
               {existingAssetMatch && (
-                <span className="text-gray-500"> (asset: {existingAssetMatch.asset_code})</span>
+                <span className="text-gray-500"> (asset: {existingAssetMatch.subject_code})</span>
               )}
               <p className="text-xs text-amber-600 mt-1">
                 Consider using the existing form rather than creating a duplicate.
@@ -651,7 +651,7 @@ export default function FormsPage() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs mb-3">
                 <div>
                   <span className="text-gray-500">Form code</span>
-                  <p className="font-mono font-bold text-sm">{generatedAssetCode}</p>
+                  <p className="font-mono font-bold text-sm">{generatedSubjectCode}</p>
                 </div>
                 <div>
                   <span className="text-gray-500">Doc definition</span>
@@ -708,7 +708,7 @@ export default function FormsPage() {
                     key={asset.id}
                     className={`border-b last:border-0 hover:bg-gray-50 ${!asset.active ? "opacity-40" : ""}`}
                   >
-                    <td className="py-2 pr-4 font-mono text-xs font-bold">{asset.asset_code}</td>
+                    <td className="py-2 pr-4 font-mono text-xs font-bold">{asset.subject_code}</td>
                     <td className="py-2 pr-4">{asset.asset_name}</td>
                     <td className="py-2 pr-4 text-xs">
                       {linked ? (
@@ -748,7 +748,7 @@ export default function FormsPage() {
             <h3 className="text-lg font-semibold mb-1" style={{ color: "var(--pss-navy)" }}>
               QR Code
             </h3>
-            <p className="text-sm text-gray-500 mb-4 font-mono">{qrAsset.asset_code} — {qrAsset.asset_name}</p>
+            <p className="text-sm text-gray-500 mb-4 font-mono">{qrAsset.subject_code} — {qrAsset.asset_name}</p>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Document Type</label>
@@ -772,8 +772,8 @@ export default function FormsPage() {
 
             <p className="text-xs text-gray-400 text-center mb-4 font-mono">
               {qrDocCode
-                ? `${docDefs.find((d) => d.doc_code === qrDocCode)?.type_code ?? qrAsset.asset_code.split("-")[0]}|${qrAsset.asset_code}|${qrDocCode}`
-                : qrAsset.asset_code}
+                ? `${docDefs.find((d) => d.doc_code === qrDocCode)?.type_code ?? qrAsset.subject_code.split("-")[0]}|${qrAsset.subject_code}|${qrDocCode}`
+                : qrAsset.subject_code}
             </p>
 
             <div className="flex justify-end gap-2">

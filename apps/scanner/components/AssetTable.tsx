@@ -5,7 +5,7 @@ import { supabase } from "@platform/supabase/client";
 
 type Asset = {
   id: number;
-  asset_code: string;
+  subject_code: string;
   asset_name: string;
   category: string;
   location: string | null;
@@ -67,10 +67,10 @@ export function AssetTable({
 
   const fetchAssets = useCallback(async () => {
     const { data } = await supabase
-      .from("asset_register")
+      .from("subject_register")
       .select("*")
       .in("category", categoryValues)
-      .order("asset_code");
+      .order("subject_code");
     setAssets(data ?? []);
     setLoading(false);
   }, [categoryValues.join(",")]);
@@ -90,7 +90,7 @@ export function AssetTable({
     if (filter) {
       const q = filter.toLowerCase();
       return (
-        a.asset_code.toLowerCase().includes(q) ||
+        a.subject_code.toLowerCase().includes(q) ||
         a.asset_name.toLowerCase().includes(q) ||
         (a.location ?? "").toLowerCase().includes(q)
       );
@@ -100,9 +100,9 @@ export function AssetTable({
 
   const getNextSeq = (prefix: string): string => {
     const existing = assets
-      .filter((a) => a.asset_code.startsWith(prefix + "-"))
+      .filter((a) => a.subject_code.startsWith(prefix + "-"))
       .map((a) => {
-        const parts = a.asset_code.split("-");
+        const parts = a.subject_code.split("-");
         return parseInt(parts[parts.length - 1], 10);
       })
       .filter((n) => !isNaN(n));
@@ -110,7 +110,7 @@ export function AssetTable({
     return String(max + 1).padStart(3, "0");
   };
 
-  const generateAssetCode = (): string => {
+  const generateSubjectCode = (): string => {
     if (!category || !subtype) return "";
     const cat = categories.find((c) => c.value === category);
     if (!cat) return "";
@@ -121,7 +121,7 @@ export function AssetTable({
 
   const handleSave = async () => {
     setFormError(null);
-    const code = generateAssetCode();
+    const code = generateSubjectCode();
     if (!code || !assetName) {
       setFormError("All required fields must be completed");
       return;
@@ -132,8 +132,8 @@ export function AssetTable({
     }
 
     setSaving(true);
-    const { error } = await supabase.from("asset_register").insert({
-      asset_code: code,
+    const { error } = await supabase.from("subject_register").insert({
+      subject_code: code,
       asset_name: assetName,
       category,
       location: location || null,
@@ -180,8 +180,8 @@ export function AssetTable({
       const docDef = docDefs.find((d) => d.doc_code === qrDocCode);
       const typeCode = docDef?.type_code ?? "HS";
       const content = qrDocCode
-        ? `${typeCode}|${qrAsset.asset_code}|${qrDocCode}`
-        : qrAsset.asset_code;
+        ? `${typeCode}|${qrAsset.subject_code}|${qrDocCode}`
+        : qrAsset.subject_code;
 
       qr.addData(content);
       qr.make();
@@ -206,8 +206,8 @@ export function AssetTable({
       ctx.font = "bold 11px monospace";
       ctx.textAlign = "center";
       const label = qrDocCode
-        ? `${qrAsset.asset_code} | ${qrDocCode}`
-        : qrAsset.asset_code;
+        ? `${qrAsset.subject_code} | ${qrDocCode}`
+        : qrAsset.subject_code;
       ctx.fillText(label, canvas.width / 2, size + padding + 20);
 
       if (qrDocCode) {
@@ -225,7 +225,7 @@ export function AssetTable({
     if (!qrCanvasRef.current || !qrAsset) return;
     const link = document.createElement("a");
     const suffix = qrDocCode ? `_${qrDocCode}` : "";
-    link.download = `${qrAsset.asset_code}${suffix}.png`;
+    link.download = `${qrAsset.subject_code}${suffix}.png`;
     link.href = qrCanvasRef.current.toDataURL("image/png");
     link.click();
   };
@@ -311,7 +311,7 @@ export function AssetTable({
               <label className="block text-xs font-medium text-gray-600 mb-1">Code</label>
               <input
                 type="text"
-                value={generateAssetCode()}
+                value={generateSubjectCode()}
                 readOnly
                 className="w-full border rounded px-2 py-1.5 text-sm bg-white font-mono font-bold"
               />
@@ -412,7 +412,7 @@ export function AssetTable({
                   key={asset.id}
                   className={`border-b last:border-0 hover:bg-gray-50 ${!asset.active ? "opacity-40" : ""}`}
                 >
-                  <td className="py-2 pr-4 font-mono text-xs font-bold">{asset.asset_code}</td>
+                  <td className="py-2 pr-4 font-mono text-xs font-bold">{asset.subject_code}</td>
                   <td className="py-2 pr-4">{asset.asset_name}</td>
                   <td className="py-2 pr-4 text-gray-600 text-xs">{asset.category}</td>
                   {showColumns.includes("location") && (
@@ -452,7 +452,7 @@ export function AssetTable({
             <h3 className="text-lg font-semibold mb-1" style={{ color: "var(--pss-navy)" }}>
               QR Code
             </h3>
-            <p className="text-sm text-gray-500 mb-4 font-mono">{qrAsset.asset_code} — {qrAsset.asset_name}</p>
+            <p className="text-sm text-gray-500 mb-4 font-mono">{qrAsset.subject_code} — {qrAsset.asset_name}</p>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Document Type (optional)</label>
@@ -476,8 +476,8 @@ export function AssetTable({
 
             <p className="text-xs text-gray-400 text-center mb-4 font-mono">
               {qrDocCode
-                ? `${docDefs.find((d) => d.doc_code === qrDocCode)?.type_code ?? "HS"}|${qrAsset.asset_code}|${qrDocCode}`
-                : qrAsset.asset_code}
+                ? `${docDefs.find((d) => d.doc_code === qrDocCode)?.type_code ?? "HS"}|${qrAsset.subject_code}|${qrDocCode}`
+                : qrAsset.subject_code}
             </p>
 
             <div className="flex justify-end gap-2">
