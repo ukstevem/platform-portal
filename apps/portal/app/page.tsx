@@ -57,6 +57,11 @@ const apps = [
     href: "/employee-presence/",
     description: "Track on-site employee presence and attendance.",
   },
+  {
+    name: "Orderbook",
+    href: "/orderbook/",
+    description: "Project intake, contract values, and item-level lifecycle status.",
+  },
 ];
 
 export default function PortalHome() {
