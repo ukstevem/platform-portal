@@ -84,13 +84,13 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
   // Load project items for the add-project picker
   useEffect(() => {
     (async () => {
-      let all: { projectnumber: string; item_seq: number; line_desc: string; completed: boolean }[] = [];
+      let all: { projectnumber: string; item_seq: number; line_desc: string; status: string }[] = [];
       let from = 0;
       const pageSize = 1000;
       while (true) {
         const { data } = await supabase
           .from("project_register_items")
-          .select("projectnumber, item_seq, line_desc, completed")
+          .select("projectnumber, item_seq, line_desc, status")
           .order("projectnumber")
           .order("item_seq")
           .range(from, from + pageSize - 1);
@@ -103,7 +103,7 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
         all.map((r) => ({
           project_item: `${r.projectnumber}-${String(r.item_seq).padStart(2, "0")}`,
           line_desc: r.line_desc,
-          completed: !!r.completed,
+          completed: r.status !== "active",
         }))
       );
     })();
