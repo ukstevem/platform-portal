@@ -73,12 +73,13 @@ export default function ProjectDetailPage() {
       setProjectInfo(regData ? { client_id: regData.client_id, created: regData.created } : null);
 
       // Project items
-      const { data: itemData } = await supabase
+      const { data: itemData, error: itemErr } = await supabase
         .from("project_register_items")
-        .select("id, projectnumber, item_seq, line_desc, value, est_labour, est_materials, completed, created")
+        .select("id, projectnumber, item_seq, line_desc, value, est_labour, est_materials, completed_at, created")
         .eq("projectnumber", projectnumber)
         .order("item_seq");
       if (cancelled) return;
+      if (itemErr) console.error("[operations] project_register_items load failed:", itemErr);
 
       const projectItems: ProjectItem[] = (itemData ?? []).map((r) => ({
         id: r.id,
@@ -88,7 +89,7 @@ export default function ProjectDetailPage() {
         value: Number(r.value) || 0,
         est_labour: Number(r.est_labour) || 0,
         est_materials: Number(r.est_materials) || 0,
-        completed: !!r.completed,
+        completed: r.completed_at !== null,
         created: r.created ?? null,
       }));
       setItems(projectItems);
@@ -193,12 +194,14 @@ export default function ProjectDetailPage() {
     await supabase.from("project_invoice_schedule").delete().eq("id", id);
   }, []);
 
-  // Toggle item completed status
+  // Toggle item completed status — write status; trigger manages completed_at.
   const toggleItemCompleted = useCallback(async (item: ProjectItem) => {
-    const newStatus = !item.completed;
-    const completedAt = newStatus ? new Date().toISOString() : null;
-    setItems((prev) => prev.map((i) => i.id === item.id ? { ...i, completed: newStatus } : i));
-    await supabase.from("project_register_items").update({ completed: newStatus, completed_at: completedAt }).eq("id", item.id);
+    const newCompleted = !item.completed;
+    setItems((prev) => prev.map((i) => i.id === item.id ? { ...i, completed: newCompleted } : i));
+    await supabase
+      .from("project_register_items")
+      .update({ status: newCompleted ? "complete" : "active" })
+      .eq("id", item.id);
   }, []);
 
   const fmtC = (v: number) =>

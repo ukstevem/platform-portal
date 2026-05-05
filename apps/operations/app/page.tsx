@@ -151,10 +151,14 @@ export default function ProjectCostOverview() {
       const compMap = new Map<string, boolean>(); // projectnumber → completed (true if ALL items completed)
       from = 0;
       while (true) {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from("project_register_items")
-          .select("id, projectnumber, item_seq, line_desc, value, est_labour, est_materials, completed")
+          .select("id, projectnumber, item_seq, line_desc, value, est_labour, est_materials, completed_at")
           .range(from, from + pageSize - 1);
+        if (error) {
+          console.error("[operations] project_register_items load failed:", error);
+          break;
+        }
         if (!data || data.length === 0) break;
         for (const r of data) {
           const itemKey = `${r.projectnumber}-${String(r.item_seq).padStart(2, "0")}`;
@@ -167,10 +171,11 @@ export default function ProjectCostOverview() {
           eLab.set(itemKey, Number(r.est_labour) || 0);
           eMat.set(itemKey, Number(r.est_materials) || 0);
           // A project is completed only if ALL its items are completed
+          const itemCompleted = r.completed_at !== null;
           const wasCompleted = compMap.get(r.projectnumber);
           if (wasCompleted === undefined) {
-            compMap.set(r.projectnumber, !!r.completed);
-          } else if (!r.completed) {
+            compMap.set(r.projectnumber, itemCompleted);
+          } else if (!itemCompleted) {
             compMap.set(r.projectnumber, false);
           }
         }
@@ -246,21 +251,20 @@ export default function ProjectCostOverview() {
     if (error) console.error("Failed to save % complete:", error);
   }, [itemIdMap]);
 
-  // Toggle project completed status
+  // Toggle project completed status — write status; trigger manages completed_at.
   const toggleCompleted = useCallback(async (projectnumber: string) => {
     const isCompleted = completedMap.get(projectnumber) ?? false;
-    const newStatus = !isCompleted;
-    const completedAt = newStatus ? new Date().toISOString() : null;
+    const newCompleted = !isCompleted;
 
     // Update all items for this project
     await supabase
       .from("project_register_items")
-      .update({ completed: newStatus, completed_at: completedAt })
+      .update({ status: newCompleted ? "complete" : "active" })
       .eq("projectnumber", projectnumber);
 
     setCompletedMap((prev) => {
       const next = new Map(prev);
-      next.set(projectnumber, newStatus);
+      next.set(projectnumber, newCompleted);
       return next;
     });
   }, [completedMap]);

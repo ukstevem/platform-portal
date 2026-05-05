@@ -23,15 +23,18 @@ export default function ProjectListPage() {
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("project_register_items")
-        .select("projectnumber, item_seq, line_desc, value, completed")
+        .select("projectnumber, item_seq, line_desc, value, completed_at")
         .order("projectnumber")
         .order("item_seq");
-      if (cancelled || !data) return;
+      if (cancelled) return;
+      if (error) console.error("[operations] project_register_items load failed:", error);
+      if (!data) return;
 
       const projMap = new Map<string, ProjectSummary>();
       for (const r of data) {
+        const itemCompleted = r.completed_at !== null;
         const existing = projMap.get(r.projectnumber);
         if (!existing) {
           projMap.set(r.projectnumber, {
@@ -39,13 +42,13 @@ export default function ProjectListPage() {
             description: r.line_desc,
             contractValue: Number(r.value) || 0,
             itemCount: 1,
-            completed: !!r.completed,
+            completed: itemCompleted,
           });
         } else {
           if (r.item_seq === 1) existing.description = r.line_desc;
           existing.contractValue += Number(r.value) || 0;
           existing.itemCount += 1;
-          if (!r.completed) existing.completed = false;
+          if (!itemCompleted) existing.completed = false;
         }
       }
 
