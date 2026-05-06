@@ -85,8 +85,12 @@ export default function WagePrepPage() {
     (async () => {
       setLoading(true);
 
+      // Load all employees (active and inactive). Inactive employees are
+      // only included in the wage rows below if they had timesheet
+      // activity in this week — preserving historic payroll reconstruction
+      // without cluttering current weeks.
       const [empRes, tsRes, wpRes, apprRes] = await Promise.all([
-        supabase.from("employees").select("id, first_name, last_name, payroll_id, team, active").eq("active", true).order("last_name").order("first_name"),
+        supabase.from("employees").select("id, first_name, last_name, payroll_id, team, active").order("last_name").order("first_name"),
         supabase.from("timesheet_entries").select("employee_id, work_date, hours, project_item, is_overtime").gte("work_date", weekISO).lte("work_date", weekEnd),
         supabase.from("acc_wage_prep").select("*").eq("week_start", weekISO),
         supabase.from("timesheet_approvals").select("employee_id").eq("week_start", weekISO),
@@ -110,7 +114,14 @@ export default function WagePrepPage() {
 
   // Calculate wage rows
   const wageRows = useMemo<WageRow[]>(() => {
-    return employees.filter((e) => e.team === "shop").map((emp) => {
+    // Active shop employees always get a row. Inactive shop employees only
+    // appear if they had timesheet entries or a wage-prep entry this week
+    // (i.e. payroll-relevant activity).
+    const empsWithEntries = new Set(timesheetData.map((t) => t.employee_id));
+    return employees
+      .filter((e) => e.team === "shop")
+      .filter((e) => e.active || empsWithEntries.has(e.id) || manualEntries.has(e.id))
+      .map((emp) => {
       const empEntries = timesheetData.filter((t) => t.employee_id === emp.id);
 
       // Split hours by day of week and type

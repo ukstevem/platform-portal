@@ -33,11 +33,13 @@ export function EmployeeStatusPanel({ monday, selectedId, onSelect, refreshKey }
       const weekStart = toISO(weekDates[0]);
       const weekEnd = toISO(weekDates[6]);
 
-      // Fetch all active employees
+      // Fetch all employees (active and inactive). Inactive employees are
+      // included so they remain visible for any past week in which they
+      // logged hours or had an approval; they are filtered out of the
+      // panel below if they have no activity in this week.
       const { data: employees } = await supabase
         .from("employees")
         .select("id, first_name, last_name, active")
-        .eq("active", true)
         .order("last_name")
         .order("first_name");
 
@@ -112,9 +114,18 @@ export function EmployeeStatusPanel({ monday, selectedId, onSelect, refreshKey }
     );
   }
 
-  const approved = statuses.filter((s) => s.approved);
-  const needsApproval = statuses.filter((s) => !s.approved && s.totalHours > 0);
-  const noHours = statuses.filter((s) => !s.approved && s.totalHours === 0);
+  // Inactive employees are only shown if they had activity this week
+  // (hours logged or an approval) — otherwise they're not relevant to
+  // the current view, but their historic data is preserved.
+  const visible = statuses.filter(
+    (s) => s.active || s.totalHours > 0 || s.approved
+  );
+
+  const approved = visible.filter((s) => s.approved);
+  const needsApproval = visible.filter((s) => !s.approved && s.totalHours > 0);
+  const noHours = visible.filter(
+    (s) => s.active && !s.approved && s.totalHours === 0
+  );
 
   const renderEmployee = (emp: EmployeeStatus) => (
     <button
@@ -127,6 +138,11 @@ export function EmployeeStatusPanel({ monday, selectedId, onSelect, refreshKey }
     >
       <span>
         {emp.last_name}, {emp.first_name}
+        {!emp.active && (
+          <span className="ml-1.5 text-xs text-gray-400" title="Inactive employee — historic data only">
+            (inactive)
+          </span>
+        )}
       </span>
       <span className="flex items-center gap-2">
         {emp.bradford.score > 0 && (
@@ -147,7 +163,7 @@ export function EmployeeStatusPanel({ monday, selectedId, onSelect, refreshKey }
   return (
     <div className="border rounded bg-white">
       <div className="px-4 py-2 border-b bg-gray-50 text-sm font-medium">
-        Timesheets — {approved.length}/{statuses.length} approved
+        Timesheets — {approved.length}/{visible.length} approved
       </div>
       <div className="max-h-80 overflow-y-auto divide-y">
         {noHours.length > 0 && (

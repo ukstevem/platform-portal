@@ -97,7 +97,6 @@ export default function ReportsPage() {
   const [bradfordData, setBradfordData] = useState<{ name: string; bradford: BradfordResult }[]>([]);
   const [descMap, setDescMap] = useState<Map<string, string>>(new Map());
   const [approvalMap, setApprovalMap] = useState<Map<string, number>>(new Map()); // mondayISO → approved count
-  const [activeEmployeeCount, setActiveEmployeeCount] = useState(0);
 
   const { rangeStart, rangeEnd } = useMemo(() => {
     const now = new Date();
@@ -151,15 +150,6 @@ export default function ReportsPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      // Get active employee count
-      const { count } = await supabase
-        .from("employees")
-        .select("id", { count: "exact", head: true })
-        .eq("active", true);
-
-      if (cancelled) return;
-      setActiveEmployeeCount(count ?? 0);
-
       // Get all approvals in the date range
       const { data: approvals } = await supabase
         .from("timesheet_approvals")
@@ -323,6 +313,22 @@ export default function ReportsPage() {
       return toISO(getMonday(d));
     };
   }, [viewMode]);
+
+  // Per-week count of employees who logged hours that week (the denominator
+  // for the "X/Y approved" ratio). Computed from entries so deactivating an
+  // employee doesn't retroactively shrink past weeks' baselines.
+  const relevantEmployeesPerWeek = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    for (const e of entries) {
+      const d = new Date(e.work_date + "T00:00:00");
+      const mondayISO = toISO(getMonday(d));
+      if (!m.has(mondayISO)) m.set(mondayISO, new Set());
+      m.get(mondayISO)!.add(e.employee_id);
+    }
+    const out = new Map<string, number>();
+    for (const [k, v] of m) out.set(k, v.size);
+    return out;
+  }, [entries]);
 
   const weekColumns = useMemo<WeekColumn[]>(() => {
     const cols: WeekColumn[] = [];
@@ -915,14 +921,15 @@ export default function ReportsPage() {
                   </td>
                   {weekColumns.map((wc) => {
                     const approved = approvalMap.get(wc.mondayISO) ?? 0;
-                    const allApproved = activeEmployeeCount > 0 && approved >= activeEmployeeCount;
+                    const relevant = relevantEmployeesPerWeek.get(wc.mondayISO) ?? 0;
+                    const allApproved = relevant > 0 && approved >= relevant;
                     return (
                       <td key={wc.mondayISO} className="border px-2 py-1.5 text-center text-xs">
                         {allApproved ? (
                           <span className="text-green-600 font-medium">&#10003; All</span>
                         ) : (
                           <span className={approved > 0 ? "text-amber-600 font-medium" : "text-gray-400"}>
-                            {approved}/{activeEmployeeCount}
+                            {approved}/{relevant}
                           </span>
                         )}
                       </td>
