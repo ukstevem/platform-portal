@@ -62,6 +62,11 @@ const apps = [
     href: "/orderbook/",
     description: "Project intake, contract values, and item-level lifecycle status.",
   },
+  {
+    name: "PO Analysis",
+    href: "/po-analysis/",
+    description: "Analyse purchase orders against project budgets and supplier spend.",
+  },
 ];
 
 export default function PortalHome() {
