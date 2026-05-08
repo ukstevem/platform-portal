@@ -45,7 +45,8 @@ networks:
 | 3010 | `matl-cert`        | Material Certs      | `/matl-cert/`   | Pi (.75) | `pss-matl-cert/app/` (standalone)    |
 | 3011 | `employee-presence`| Employee Presence   | `/employee-presence/` | Pi (.75) | `pss-employee-presence/app/` (standalone) |
 | 3012 | `orderbook`        | Orderbook           | `/orderbook/`   | Pi (.75) | `pss-orderbook/app/` (standalone)    |
-| 3013 | *reserved*         | next standalone     | —               | —        | —                                    |
+| 3013 | `po-analysis`      | PO Analysis         | `/po-analysis/` | Pi (.75) | `pss-purchase-order-analysis/app/` (standalone) |
+| 3014 | *reserved*         | next standalone     | —               | —        | —                                    |
 
 ## Standalone vs monorepo — which wins?
 
