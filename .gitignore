@@ -10,7 +10,8 @@ out/
 Thumbs.db
 portainer.env
 old_timesheets/
-design guide/
+design guide/*
+!design guide/*.md
 *.tsbuildinfo
 
 # Beads / Dolt files (added by bd init)
