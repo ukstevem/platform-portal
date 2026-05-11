@@ -3,6 +3,14 @@
 import { useState } from "react";
 import { useAuth } from "@platform/auth/AuthProvider";
 import { AuthButton } from "@platform/auth/AuthButton";
+import { AmbientBackdrop } from "@platform/ui";
+
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning";
+  if (h < 18) return "Good afternoon";
+  return "Good evening";
+}
 
 const apps = [
   {
@@ -91,26 +99,62 @@ export default function PortalHome() {
 
   if (!user) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen gap-6">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/pss-logo.png" alt="Power System Services" className="h-16 w-auto" />
-        <h1 className="text-2xl font-semibold" style={{ color: "var(--pss-navy)" }}>
-          Platform Portal
-        </h1>
-        <p className="text-gray-600">Sign in to access the PSS platform</p>
-        <AuthButton redirectTo="/auth/callback" />
+      <div className="relative min-h-screen overflow-hidden" style={{ background: "#050d1c" }}>
+        <AmbientBackdrop src="/photos/signin-01.jpg" variant="full" />
+        <div className="relative flex items-center justify-center min-h-screen p-6">
+          <div
+            className="w-full max-w-md rounded-[10px] p-9 relative overflow-hidden"
+            style={{
+              background:
+                "linear-gradient(165deg,rgba(12,45,90,0.92) 0%,rgba(10,35,72,0.94) 55%,rgba(7,26,54,0.96) 100%)",
+              backdropFilter: "blur(8px)",
+              WebkitBackdropFilter: "blur(8px)",
+              border: "1px solid rgba(22,58,106,0.9)",
+              boxShadow: "0 30px 80px -20px rgba(0,0,0,0.6)",
+            }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/pss-logo-reversed.png" alt="Power System Services" className="h-10 w-auto mb-6" />
+            <div className="text-[11px] font-semibold tracking-[0.18em] uppercase" style={{ color: "var(--pss-sky)" }}>
+              Platform · Sign in
+            </div>
+            <h1 className="text-[26px] font-bold mt-1.5 tracking-tight text-white">
+              Welcome back.
+            </h1>
+            <p className="text-sm mt-1" style={{ color: "#97a8c2" }}>
+              Sign in to access the PSS platform.
+            </p>
+            <div className="mt-6">
+              <AuthButton redirectTo="/auth/callback" />
+            </div>
+            <div className="border-t mt-6 pt-4 text-xs" style={{ borderColor: "#0c2d5a", color: "#5e7396" }}>
+              PSS Power System Services · Internal use only
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="p-8 max-w-4xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-2xl font-semibold" style={{ color: "var(--pss-navy)" }}>
-          Welcome{user.fullName ? `, ${user.fullName}` : ""}
-        </h1>
-        <p className="text-gray-500 mt-1">Power System Services Platform</p>
-      </div>
+      <section
+        className="relative overflow-hidden rounded-md mb-7 px-7 py-6 flex items-center gap-6"
+        style={{ background: "var(--pss-navy)", color: "#eef4fb", minHeight: 132 }}
+      >
+        <AmbientBackdrop src="/photos/home-01.jpg" variant="hero" position="center 55%" />
+        <div className="relative flex-1">
+          <div className="text-[11px] font-semibold tracking-[0.12em] uppercase" style={{ color: "var(--pss-sky)" }}>
+            {new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}
+          </div>
+          <div className="text-[26px] font-bold mt-1.5 tracking-tight">
+            {greeting()}{user.fullName ? `, ${user.fullName.split(" ")[0]}` : ""}.
+          </div>
+          <div className="text-sm mt-1" style={{ color: "#c2cce0" }}>
+            Power System Services Platform
+          </div>
+        </div>
+      </section>
 
       <div className="flex gap-4 mb-6 border-b">
         <button

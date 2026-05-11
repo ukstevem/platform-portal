@@ -35,8 +35,10 @@ body {
 
 /* Sidebar / nav backgrounds */
 .pss-sidebar {
-  background: var(--pss-navy);
+  background: linear-gradient(180deg, #0a2348 0%, #081a36 100%);
   color: var(--pss-white);
+  border-right: 1px solid #11305c;
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.02);
 }
 .pss-sidebar a {
   color: var(--pss-sky-light);

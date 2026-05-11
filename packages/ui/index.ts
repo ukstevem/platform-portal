@@ -5,3 +5,4 @@ export { PageHeader } from "./PageHeader";
 export { Sidebar } from "./Sidebar";
 export type { NavItem, NavSection } from "./Sidebar";
 export { LayoutShell } from "./LayoutShell";
+export { AmbientBackdrop } from "./AmbientBackdrop";
