@@ -14,6 +14,10 @@ design guide/*
 !design guide/*.md
 *.tsbuildinfo
 
+# Arduino / M5Stack firmware secrets — never commit creds
+arduino_secrets.h
+**/arduino_secrets.h
+
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db
