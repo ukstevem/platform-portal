@@ -17,6 +17,7 @@ const SUBTYPES = {
     { value: "DRL", label: "Drill" },
     { value: "GRN", label: "Grinder" },
     { value: "PRB", label: "Press Brake" },
+    { value: "PUN", label: "Punch" },
     { value: "GIL", label: "Guillotine" },
     { value: "SAW", label: "Band Saw" },
     { value: "LTH", label: "Lathe" },
