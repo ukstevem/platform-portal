@@ -254,6 +254,10 @@ export default function HistoryPage() {
     );
   }
 
+  function sectionList(payload: SavedPayload) {
+    return payload.sections.map((s) => s.section).join(", ");
+  }
+
   const statusBadge = (status: NestingJob["status"]) => {
     const styles: Record<string, string> = {
       running: "bg-blue-100 text-blue-700",
@@ -303,21 +307,7 @@ export default function HistoryPage() {
                     {job.project_number ?? "—"}
                   </td>
                   <td className="border px-3 py-1.5 text-xs text-gray-600">
-                    <div className="space-y-0.5">
-                      {job.request_payload.sections.map((s, si) => (
-                        <div key={si}>
-                          <span>{s.section}</span>
-                          {s.comments?.trim() && (
-                            <span
-                              className="block italic text-gray-400"
-                              title={s.comments}
-                            >
-                              {s.comments}
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
+                    {sectionList(job.request_payload)}
                   </td>
                   <td className="border px-3 py-1.5 text-center">
                     {statusBadge(job.status)}

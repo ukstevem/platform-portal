@@ -335,6 +335,7 @@ export function NestingPage({ initialPayload }: NestingPageProps = {}) {
 
     const stockPerSection = validSections.map((sec) => ({
       section: sec.section.trim(),
+      comments: sec.comments.trim() || undefined,
       stock: sec.stock
         .filter((st) => parseInt(st.length) > 0 && parseInt(st.qty) > 0)
         .map((st) => ({

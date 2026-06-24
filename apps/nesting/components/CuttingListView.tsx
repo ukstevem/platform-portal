@@ -45,6 +45,7 @@ type Bar = {
 
 type SectionResult = {
   designation: string;
+  comments?: string | null;
   items_placed: number;
   items_unassigned: number;
   phase1_status: string;
@@ -281,6 +282,17 @@ function SectionDetail({ section }: { section: SectionResult }) {
       </div>
 
       <div className="px-4 pb-4 space-y-4">
+        {section.comments?.trim() && (
+          <div className="rounded bg-blue-50 border border-blue-200 px-4 py-2.5">
+            <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: PRIMARY }}>
+              Comments
+            </p>
+            <p className="mt-0.5 text-xs text-gray-700 whitespace-pre-wrap">
+              {section.comments}
+            </p>
+          </div>
+        )}
+
         {section.bars.map((bar) => (
           <BarDetail key={bar.stock_id} bar={bar} />
         ))}
