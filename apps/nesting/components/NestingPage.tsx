@@ -17,6 +17,7 @@ type StockRow = { id: number; length: string; qty: string };
 type SectionBlock = {
   id: number;
   section: string;
+  comments: string;
   cuts: CutRow[];
   stock: StockRow[];
 };
@@ -64,6 +65,7 @@ function emptySection(): SectionBlock {
   return {
     id: nextId(),
     section: "",
+    comments: "",
     cuts: [emptyCut()],
     stock: [emptyStock()],
   };
@@ -197,7 +199,7 @@ export function NestingPage({ initialPayload }: NestingPageProps = {}) {
   /* ---- section / row mutators ---- */
   function updateSection(
     secId: number,
-    field: "section",
+    field: "section" | "comments",
     value: string
   ) {
     setSections((prev) =>
@@ -354,6 +356,7 @@ export function NestingPage({ initialPayload }: NestingPageProps = {}) {
       job_label: jobLabel || undefined,
       sections: sections.map((s) => ({
         section: s.section,
+        comments: s.comments,
         cuts: s.cuts.map((c) => ({ length: c.length, qty: c.qty })),
         stock: s.stock.map((st) => ({ length: st.length, qty: st.qty })),
       })),
@@ -510,6 +513,23 @@ export function NestingPage({ initialPayload }: NestingPageProps = {}) {
                   Remove
                 </button>
               )}
+            </div>
+
+            {/* section comments */}
+            <div className="px-4 pt-3">
+              <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                Comments
+              </label>
+              <textarea
+                placeholder="Optional notes for this section"
+                value={sec.comments}
+                onChange={(e) =>
+                  updateSection(sec.id, "comments", e.target.value)
+                }
+                disabled={isRunning}
+                rows={2}
+                className="w-full border rounded px-3 py-1.5 text-sm resize-y"
+              />
             </div>
 
             <div className="p-4 grid md:grid-cols-2 gap-4">
