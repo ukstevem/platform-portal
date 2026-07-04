@@ -46,7 +46,11 @@ networks:
 | 3011 | `employee-presence`| Employee Presence   | `/employee-presence/` | Pi (.75) | `pss-employee-presence/app/` (standalone) |
 | 3012 | `orderbook`        | Orderbook           | `/orderbook/`   | Pi (.75) | `pss-orderbook/app/` (standalone)    |
 | 3013 | `po-analysis`      | PO Analysis         | `/po-analysis/` | Pi (.75) | `pss-purchase-order-analysis/app/` (standalone) |
-| 3014 | *reserved*         | next standalone     | —               | —        | —                                    |
+| 3014 | `production-card`  | Production Card     | `/production-card/` | Pi (.75) | `pss-production-card/app/` (standalone) |
+| 3015 | `welding-control`  | Welding Control    | `/welding-control/` | Pi (.75) | `pss-welding-control/app/` (standalone) |
+| 3016 | `nc1cad-app`       | NC1 → DXF UI        | `/nc1cad/`      | Pi (.75) | `pss-nc1cad-app/app/` (standalone, planned) |
+| 3017 | `purchase-order`   | Purchase Orders     | `/purchase-order/` | Pi (.75) | `pss-purchase-order/app/` (standalone) |
+| 3018 | *reserved*         | next standalone     | —               | —        | —                                    |
 
 ## Standalone vs monorepo — which wins?
 
@@ -57,6 +61,7 @@ When an app moves out of the monorepo, **keep its port and service name identica
 | Host IP   | Port | Purpose                                |
 |-----------|------|----------------------------------------|
 | 10.0.0.74 | 8001 | Nesting CP-SAT solver (Orin)           |
+| 10.0.0.74 | 8016 | NC1 → DXF service (Orin)               |
 | 10.0.0.74 | 3000 | Doc service (Orin)                     |
 | 10.0.0.75 | 80   | Doc service gateway (Pi)               |
 | 10.0.0.75 | 9443 | Portainer                              |
