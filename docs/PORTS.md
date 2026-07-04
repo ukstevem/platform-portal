@@ -62,6 +62,7 @@ When an app moves out of the monorepo, **keep its port and service name identica
 |-----------|------|----------------------------------------|
 | 10.0.0.74 | 8001 | Nesting CP-SAT solver (Orin)           |
 | 10.0.0.74 | 8016 | NC1 → DXF service (Orin)               |
+| 10.0.0.74 | 8017 | PDF render service (Orin, `pss-pdf-service`) |
 | 10.0.0.74 | 3000 | Doc service (Orin)                     |
 | 10.0.0.75 | 80   | Doc service gateway (Pi)               |
 | 10.0.0.75 | 9443 | Portainer                              |
