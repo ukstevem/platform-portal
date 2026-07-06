@@ -74,6 +74,7 @@ const apps = [
     name: "PO Analysis",
     href: "/po-analysis/",
     description: "Analyse purchase orders against project budgets and supplier spend.",
+    disabled: true,
   },
   {
     name: "Purchase Order System",
@@ -84,6 +85,7 @@ const apps = [
     name: "Risk Library",
     href: "/risk-library/",
     description: "Surface similar past risks and issues during a new project's risk assessment.",
+    disabled: true,
   },
 ];
 
