@@ -75,6 +75,16 @@ const apps = [
     href: "/po-analysis/",
     description: "Analyse purchase orders against project budgets and supplier spend.",
   },
+  {
+    name: "Purchase Order System",
+    href: "/purchase-order/",
+    description: "Raise, approve, and track purchase orders through their lifecycle.",
+  },
+  {
+    name: "Risk Library",
+    href: "/risk-library/",
+    description: "Surface similar past risks and issues during a new project's risk assessment.",
+  },
 ];
 
 export default function PortalHome() {
