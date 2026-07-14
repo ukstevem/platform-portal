@@ -118,8 +118,8 @@ export function CuttingListView({
   const util = overallUtilisation(result.sections);
   const { totals } = result;
 
-  function downloadPdf() {
-    if (taskId) window.open(`/nesting/api/nesting/cutting-list/${taskId}/pdf`, "_blank");
+  function openPrintView() {
+    if (taskId) window.open(`/nesting/api/nesting/cutting-list/${taskId}/view`, "_blank");
   }
 
   function downloadCsv() {
@@ -140,11 +140,11 @@ export function CuttingListView({
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={downloadPdf}
+              onClick={openPrintView}
               className="px-4 py-1.5 rounded text-sm font-medium text-white cursor-pointer"
               style={{ backgroundColor: "var(--pss-navy)" }}
             >
-              Download PDF
+              Print View
             </button>
             <button
               type="button"
