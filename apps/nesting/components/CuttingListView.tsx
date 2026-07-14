@@ -1,5 +1,8 @@
 "use client";
 
+import { useState } from "react";
+import { fileCuttingList } from "@/app/actions";
+
 /**
  * Shared cutting list results view — mirrors the PDF template layout.
  *
@@ -118,8 +121,37 @@ export function CuttingListView({
   const util = overallUtilisation(result.sections);
   const { totals } = result;
 
+  const [filing, setFiling] = useState(false);
+  const [fileResult, setFileResult] = useState<
+    { ok: boolean; text: string; url?: string } | null
+  >(null);
+
   function openPrintView() {
     if (taskId) window.open(`/nesting/api/nesting/cutting-list/${taskId}/view`, "_blank");
+  }
+
+  async function issueCuttingList() {
+    if (!taskId || filing) return;
+    setFiling(true);
+    setFileResult(null);
+    try {
+      const r = await fileCuttingList(taskId);
+      if (r.ok) {
+        setFileResult({
+          ok: true,
+          text: r.alreadyFiled
+            ? `Already filed as ${r.docNumber}`
+            : `Filed as ${r.docNumber}`,
+          url: r.url,
+        });
+      } else {
+        setFileResult({ ok: false, text: r.error ?? "Filing failed" });
+      }
+    } catch (e) {
+      setFileResult({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setFiling(false);
+    }
   }
 
   function downloadCsv() {
@@ -137,22 +169,54 @@ export function CuttingListView({
           Cutting List{result.job_label ? ` — ${result.job_label}` : ""}
         </h2>
         {taskId && (
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={openPrintView}
-              className="px-4 py-1.5 rounded text-sm font-medium text-white cursor-pointer"
-              style={{ backgroundColor: "var(--pss-navy)" }}
-            >
-              Print View
-            </button>
-            <button
-              type="button"
-              onClick={downloadCsv}
-              className="px-4 py-1.5 rounded text-sm font-medium border cursor-pointer hover:bg-gray-50"
-            >
-              Download CSV
-            </button>
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={openPrintView}
+                className="px-4 py-1.5 rounded text-sm font-medium text-white cursor-pointer"
+                style={{ backgroundColor: "var(--pss-navy)" }}
+              >
+                Print View
+              </button>
+              <button
+                type="button"
+                onClick={issueCuttingList}
+                disabled={filing}
+                className="px-4 py-1.5 rounded text-sm font-medium text-white cursor-pointer disabled:opacity-60"
+                style={{ backgroundColor: GREEN }}
+              >
+                {filing ? "Filing…" : "File Cutting List"}
+              </button>
+              <button
+                type="button"
+                onClick={downloadCsv}
+                className="px-4 py-1.5 rounded text-sm font-medium border cursor-pointer hover:bg-gray-50"
+              >
+                Download CSV
+              </button>
+            </div>
+            {fileResult && (
+              <span
+                className="text-xs"
+                style={{ color: fileResult.ok ? GREEN : RED }}
+              >
+                {fileResult.text}
+                {fileResult.url && (
+                  <>
+                    {" · "}
+                    <a
+                      href={fileResult.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline"
+                    >
+                      open PDF
+                    </a>
+                  </>
+                )}
+              </span>
+            )}
           </div>
         )}
       </div>
