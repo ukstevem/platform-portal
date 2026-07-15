@@ -97,3 +97,9 @@ services:
       - PORT=3008
       - NESTING_SERVICE_URL=${NESTING_SERVICE_URL:-http://10.0.0.74:8001}
       - DOC_SERVICE_URL=${DOC_SERVICE_URL:-http://10.0.0.74:3000}
+      # Cutting-list filing (epic platform-portal-6gr): server action needs the
+      # Supabase service key + the doc-service app key at runtime.
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SECRET_KEY}
+      - NESTING_DOC_SERVICE_API_KEY=${NESTING_DOC_SERVICE_API_KEY}
+      - NESTING_ISO_DESCRIPTION_ID=${NESTING_ISO_DESCRIPTION_ID:-66}

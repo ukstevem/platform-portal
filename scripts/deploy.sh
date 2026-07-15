@@ -4,10 +4,14 @@ set -euo pipefail
 REGISTRY="ghcr.io/ukstevem/platform-portal"
 PLATFORM="linux/arm64"
 
-# Load env vars for build args
-if [ -f .env ]; then
-  set -a; source .env; set +a
+# Load env vars for build args. Hard-fail if missing — silently shipping an
+# image with empty NEXT_PUBLIC_SUPABASE_URL is worse than a build error.
+if [ ! -f .env.production ]; then
+  echo "ERROR: .env.production not found. This file is required for production builds." >&2
+  echo "       Copy env.production.example to .env.production and fill in the cloud Supabase values." >&2
+  exit 1
 fi
+set -a; source .env.production; set +a
 
 echo "=== Building and pushing images for $PLATFORM ==="
 echo ""
@@ -39,11 +43,11 @@ is_standalone() {
 }
 
 # Build and push each app
-for APP in portal jobcards documents timesheets scanner laserquote assembly-viewer; do
+for APP in portal jobcards documents timesheets scanner laserquote assembly-viewer nesting; do
   echo ""
   echo "--- $APP ---"
 
-  PORT_MAP=("portal:3000" "jobcards:3001" "documents:3002" "timesheets:3003" "scanner:3005" "laserquote:3006" "assembly-viewer:3007")
+  PORT_MAP=("portal:3000" "jobcards:3001" "documents:3002" "timesheets:3003" "scanner:3005" "laserquote:3006" "assembly-viewer:3007" "nesting:3008")
   APP_PORT="3000"
   for p in "${PORT_MAP[@]}"; do
     if [[ "$p" == "$APP:"* ]]; then
