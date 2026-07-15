@@ -34,12 +34,32 @@ interface Unassigned {
   member_name?: string | null;
   length: number;
 }
+// Stock-bar consumption roll-up (from the /cutting-list JSON). Per-section is
+// grouped by length; the overall is section-major so distinct profiles at the
+// same stock length are never merged into one line.
+interface StockConsumptionGroup {
+  length_mm: number;
+  qty: number;
+}
+interface StockConsumption {
+  total_bars: number;
+  groups: StockConsumptionGroup[];
+}
+interface SectionStockConsumption {
+  designation: string;
+  consumption: StockConsumption;
+}
+interface OverallStockConsumption {
+  total_bars: number;
+  by_section: SectionStockConsumption[];
+}
 interface Section {
   designation: string;
   comments?: string | null;
   phase1_status: string;
   phase2_status?: string | null;
   summary: SectionSummary;
+  stock_consumption?: StockConsumption;
   bars: Bar[];
   unassigned: Unassigned[];
 }
@@ -53,6 +73,7 @@ export interface CuttingListData {
   job_label?: string | null;
   run_at?: string;
   totals: Totals;
+  stock_consumption?: OverallStockConsumption;
   sections: Section[];
 }
 
@@ -87,6 +108,10 @@ h1 { font-size: 14pt; color: #1a3a5c; margin: 0 0 1mm; }
 .kpi .l { font-size: 5.5pt; text-transform: uppercase; letter-spacing: .5pt; color: #64748b; margin-top: .8mm; }
 .consumed { font-size: 8pt; margin-bottom: 4mm; }
 .consumed .lab { font-weight: 700; color: #64748b; text-transform: uppercase; font-size: 7pt; margin-right: 2mm; }
+.consumed-tbl { margin-top: 1.5mm; border-collapse: collapse; font-size: 8pt; }
+.consumed-tbl td { padding: 0.3mm 6mm 0.3mm 0; vertical-align: top; }
+.consumed-tbl .scs { font-weight: 600; color: #1e293b; }
+.consumed-tbl .scg { color: #334155; }
 table.syn { width: 100%; border-collapse: collapse; margin-bottom: 5mm; font-size: 7.5pt; }
 table.syn th { text-align: left; color: #64748b; font-size: 6.5pt; text-transform: uppercase; border-bottom: 0.3mm solid #e2e8f0; padding: 1mm; }
 table.syn td { padding: 1mm; border-bottom: 0.2mm solid #f1f5f9; vertical-align: middle; }
@@ -146,14 +171,29 @@ function pct(part: number, whole: number): number {
   return whole > 0 ? Math.round((part / whole) * 100) : 0;
 }
 
-/** Roll up bars consumed, grouped by length, longest first. */
-function stockConsumption(bars: { stock_length_mm: number }[]): string {
-  const counts = new Map<number, number>();
-  for (const b of bars) counts.set(b.stock_length_mm, (counts.get(b.stock_length_mm) ?? 0) + 1);
-  const groups = [...counts.entries()].sort((a, b) => b[0] - a[0]);
-  const total = groups.reduce((s, [, q]) => s + q, 0);
-  if (total === 0) return "0 bars";
-  return `${total} bars: ${groups.map(([len, q]) => `${q}@${len}`).join(", ")}`;
+// Stock consumption is computed once by pss-nesting-service and carried on the
+// /cutting-list JSON — read it here rather than recomputing from bars.
+
+/** "24 @ 12200, 12 @ 6000" — one section's length groups, longest first. */
+function fmtGroups(groups: StockConsumptionGroup[]): string {
+  return groups.map((g) => `${g.qty} @ ${g.length_mm}`).join(", ");
+}
+
+/** One section's summary line, e.g. "24 bars: 12 @ 12200, 12 @ 6000". */
+function fmtConsumptionLine(sc?: StockConsumption): string {
+  if (!sc || sc.total_bars === 0) return "0 bars";
+  return `${sc.total_bars} bars: ${fmtGroups(sc.groups)}`;
+}
+
+/** Section-major overall roll-up. Prefers the top-level field; falls back to
+ *  the per-section fields (present in the deployed nesting-service). */
+function overallBySection(data: CuttingListData): SectionStockConsumption[] {
+  if (data.stock_consumption?.by_section?.length) {
+    return data.stock_consumption.by_section;
+  }
+  return (data.sections ?? [])
+    .filter((s) => (s.stock_consumption?.total_bars ?? 0) > 0)
+    .map((s) => ({ designation: s.designation, consumption: s.stock_consumption! }));
 }
 
 function wasteStr(mm: number): string {
@@ -255,7 +295,7 @@ export function buildCuttingListHtml(
 
       return `<div class="section">
   <h2><span>${esc(sec.designation)} <span class="sub">— ${sec.summary.items_placed} placed, ${sec.summary.stocks_used} bars</span></span><span class="badge" style="background:${statusColour(sec.phase1_status)}">${esc(sec.phase1_status)}</span></h2>
-  <div class="sec-consumed">Stock consumed: ${esc(stockConsumption(secBars))}</div>
+  <div class="sec-consumed">Stock consumed: ${esc(fmtConsumptionLine(sec.stock_consumption))}</div>
   ${note}
   ${barsHtml}
   ${unassignedHtml}
@@ -266,6 +306,22 @@ export function buildCuttingListHtml(
   const label = (data.job_label ?? "").trim();
   const watermark = options.watermark ? `<div class="watermark">${esc(options.watermark)}</div>` : "";
 
+  // Overall stock consumed — section-major so distinct profiles at the same
+  // stock length stay on their own line (24 angle + 24 channel @12200 is two
+  // order lines, not "48@12200").
+  const ovList = overallBySection(data);
+  const ovTotal =
+    data.stock_consumption?.total_bars ??
+    ovList.reduce((sum, s) => sum + s.consumption.total_bars, 0);
+  const consumedHtml = ovList.length
+    ? `<div class="consumed"><span class="lab">Stock consumed</span>${ovTotal} bars total<table class="consumed-tbl"><tbody>${ovList
+        .map(
+          (s) =>
+            `<tr><td class="scs">${esc(s.designation)}</td><td class="scg">${esc(fmtGroups(s.consumption.groups))}</td></tr>`
+        )
+        .join("")}</tbody></table></div>`
+    : "";
+
   const html = `<!doctype html><html><head><meta charset="utf-8"><style>${CSS}</style></head><body>
 ${watermark}<div class="head">
   <div><img src="${PSS_LOGO_DATA_URI}" alt="PSS"></div>
@@ -274,7 +330,7 @@ ${watermark}<div class="head">
 <h1>Cutting List${label ? ` — ${esc(label)}` : ""}</h1>
 <div class="subtitle">${data.run_at ? `Nesting run: ${esc(fmtDate(data.run_at))}` : ""}</div>
 <div class="kpis">${kpiHtml}</div>
-<div class="consumed"><span class="lab">Stock consumed</span>${esc(stockConsumption(allBars))}</div>
+${consumedHtml}
 <table class="syn">
   <thead><tr><th>Section</th><th>Placed</th><th>Bars</th><th>Utilisation</th><th>Waste</th><th>Status</th></tr></thead>
   <tbody>${synRows}</tbody>
