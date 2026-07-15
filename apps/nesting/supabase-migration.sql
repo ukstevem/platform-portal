@@ -36,7 +36,6 @@ create policy "Authenticated users can update nesting jobs"
 -- If you already created the table without the status column, run:
 -- alter table nesting_jobs add column if not exists status text not null default 'running';
 
--- 2026-07-14 (epic platform-portal-6gr.4): reference to the filed, numbered
--- cutting-list PDF in pss-document-service. Run in the Supabase SQL editor.
-alter table nesting_jobs add column if not exists issued_doc_id text;
-alter table nesting_jobs add column if not exists issued_doc_number text;
+-- Note (epic platform-portal-6gr.4): the filed cutting-list doc reference is
+-- stored under result_summary->'issued_doc' (jsonb), so no schema change is
+-- needed. Promote to dedicated columns later if you want to query by doc number.

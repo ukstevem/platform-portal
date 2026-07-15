@@ -18,14 +18,22 @@ export interface FileCuttingListActionResult {
   error?: string;
 }
 
+/** Filed-doc reference kept inside the nesting_jobs.result_summary jsonb blob
+ *  (avoids a schema migration — the portal already writes this column). */
+interface IssuedDocRef {
+  id: string;
+  doc_number: string;
+  url?: string;
+}
+
 /**
  * File the cutting list for a nesting task as a numbered, tracked PDF
  * (epic platform-portal-6gr.4). Builds the same self-contained HTML used for
- * the Print View, renders + files it via the doc-service, and stamps the
- * returned doc number onto the nesting_jobs row.
+ * the Print View, renders + files it via the doc-service, and records the
+ * returned doc number under result_summary.issued_doc on the nesting_jobs row.
  *
- * Guards against re-filing: if the job already has issued_doc_id, returns it
- * without minting a new number (the doc-service byte-dedup never fires for
+ * Guards against re-filing: if the job already carries an issued_doc, returns
+ * it without minting a new number (the doc-service byte-dedup never fires for
  * rendered output — Chromium embeds timestamps — so the guard lives here).
  */
 export async function fileCuttingList(
@@ -35,7 +43,7 @@ export async function fileCuttingList(
 
   const { data: job, error: jobErr } = await sb
     .from("nesting_jobs")
-    .select("id, project_number, issued_doc_id, issued_doc_number")
+    .select("id, project_number, result_summary")
     .eq("task_id", taskId)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -43,9 +51,13 @@ export async function fileCuttingList(
 
   if (jobErr) return { ok: false, error: jobErr.message };
   if (!job) return { ok: false, error: "Nesting job not found for this task." };
-  if (job.issued_doc_id) {
-    return { ok: true, alreadyFiled: true, docNumber: job.issued_doc_number ?? undefined };
+
+  const summary = (job.result_summary ?? {}) as Record<string, unknown>;
+  const existing = summary.issued_doc as IssuedDocRef | undefined;
+  if (existing?.id) {
+    return { ok: true, alreadyFiled: true, docNumber: existing.doc_number, url: existing.url };
   }
+
   if (!job.project_number || !String(job.project_number).trim()) {
     return {
       ok: false,
@@ -75,13 +87,18 @@ export async function fileCuttingList(
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 
+  const issued: IssuedDocRef = {
+    id: filed.id,
+    doc_number: filed.doc_number,
+    url: filed.url,
+  };
   const { error: upErr } = await sb
     .from("nesting_jobs")
-    .update({ issued_doc_id: filed.id, issued_doc_number: filed.doc_number })
+    .update({ result_summary: { ...summary, issued_doc: issued } })
     .eq("id", job.id);
 
   if (upErr) {
-    // Filed but not stamped — surface loudly with the doc number so it can be
+    // Filed but not recorded — surface loudly with the doc number so it can be
     // reconciled by hand (a retry would re-file).
     return {
       ok: false,
