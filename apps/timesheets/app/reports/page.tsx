@@ -6,7 +6,7 @@ import { supabase } from "@platform/supabase";
 import { useAuth } from "@platform/auth/AuthProvider";
 import { AuthButton } from "@platform/auth/AuthButton";
 import { getMonday, toISO, formatWeekRange, getWeekDates, DAY_LABELS } from "@/lib/weekHelpers";
-import { calculateBradford, BRADFORD_THRESHOLDS, type BradfordResult } from "@/lib/bradford";
+import { calculateBradford, BRADFORD_THRESHOLDS, BRADFORD_WINDOW_WEEKS, type BradfordResult } from "@/lib/bradford";
 import XLSX from "xlsx-js-style";
 
 type RawEntry = {
@@ -1030,7 +1030,11 @@ export default function ReportsPage() {
         <h2 className="text-lg font-semibold mb-3">Bradford Factor</h2>
         <p className="text-xs text-gray-500 mb-3">
           B = S² x D — where S = separate sickness spells, D = total sick days (Mon–Thu only).
-          Calculated across all available data.
+          Rolling {BRADFORD_WINDOW_WEEKS} weeks
+          {bradfordData[0]
+            ? ` (${bradfordData[0].bradford.windowStart} to ${bradfordData[0].bradford.windowEnd})`
+            : ""}
+          , independent of the date range above. Absences older than the window age out.
         </p>
         <div className="overflow-x-auto">
           <table className="border-collapse text-sm">
