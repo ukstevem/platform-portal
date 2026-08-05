@@ -43,12 +43,20 @@ type WageRow = {
   x15: number;
   x20: number;
   otProjects: string;
+  /** Hours the OT rules say are premium but which aren't flagged on the
+   *  timesheet — paid at basic until someone flags them against a job. */
+  unflaggedOT: number;
   furlough: number;
   travel: number;
   bonus: number;
   subs: number;
   comments: string;
 };
+
+/** Trim float accumulation noise for display (2.9999999999 → 3) */
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
 
 function getISOWeekNumber(date: Date): number {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -124,135 +132,132 @@ export default function WagePrepPage() {
       .map((emp) => {
       const empEntries = timesheetData.filter((t) => t.employee_id === emp.id);
 
-      // Split hours by day of week and type
-      let monFriHours = 0;
-      let saturdayHours = 0;
-      let sundayHours = 0;
+      // Pay rate follows the is_overtime flag on each timesheet entry — the
+      // grid auto-flags Sat/Sun once Mon–Fri reaches the threshold, and the
+      // user can toggle any cell. An hour is basic unless it is flagged, so
+      // no hour is ever dropped. Which premium rate a flagged hour attracts
+      // depends on the day it was worked:
+      //   Mon–Fri  → 1.5x
+      //   Saturday → first satX15Limit hours 1.5x, remainder 2.0x
+      //   Sunday   → 2.0x
+      let basic = 0;
       let holidayHours = 0;
       let sickHours = 0;
-      const projectHoursMap = new Map<string, number>();
+      let monFriOTHours = 0;  // flagged Mon–Fri — all 1.5x
+      let sundayOTHours = 0;  // flagged Sunday — all 2.0x
+      const satOTByProject = new Map<string, number>();
+
+      // Threshold tracking, used only to warn about premium hours that
+      // nobody has flagged against a job. Holiday counts towards the
+      // threshold, sick does not — same rule as TimesheetGrid.
+      let monFriThresholdHours = 0;
+      let weekendWorkedHours = 0;
 
       for (const e of empEntries) {
         const hrs = Number(e.hours);
-        if (e.project_item === "HOLIDAY-01") {
-          holidayHours += hrs;
-          continue;
-        }
+        const dayOfWeek = new Date(e.work_date + "T00:00:00").getDay(); // 0=Sun, 1=Mon...6=Sat
+        const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
+
         if (e.project_item === "SICK-01") {
           sickHours += hrs;
           continue;
         }
-        // Training and all other items count towards basic hours
+        if (e.project_item === "HOLIDAY-01") {
+          holidayHours += hrs;
+          if (isWeekday) monFriThresholdHours += hrs;
+          continue;
+        }
+        // Training and all other items are worked hours.
 
-        const dayOfWeek = new Date(e.work_date + "T00:00:00").getDay(); // 0=Sun, 1=Mon...6=Sat
-        if (dayOfWeek >= 1 && dayOfWeek <= 5) {
-          monFriHours += hrs;
-        } else if (dayOfWeek === 6) {
-          saturdayHours += hrs;
+        if (isWeekday) monFriThresholdHours += hrs;
+        else weekendWorkedHours += hrs;
+
+        if (!e.is_overtime) {
+          basic += hrs;
+          continue;
+        }
+
+        if (dayOfWeek === 6) {
+          // Saturday splits across two rates — settle it once we know the total
+          satOTByProject.set(e.project_item, (satOTByProject.get(e.project_item) ?? 0) + hrs);
         } else if (dayOfWeek === 0) {
-          sundayHours += hrs;
+          sundayOTHours += hrs;
+        } else {
+          monFriOTHours += hrs;
         }
-        projectHoursMap.set(e.project_item, (projectHoursMap.get(e.project_item) ?? 0) + hrs);
       }
 
-      // OT rules:
-      // 1. Basic = first 40h cumulative Mon-Fri
-      // 2. Once 40h hit: remaining Mon-Fri hours = 1.5x
-      // 3. If threshold met: Sat first satX15Limit (5h) = 1.5x, Sat beyond = 2.0x
-      // 4. Sunday: all hours at 2.0x (if threshold met)
-      // 5. If threshold NOT met: no OT, Sat/Sun fill basic
-      let basic: number;
-      let x15 = 0;
-      let x20 = 0;
-
-      const monFriOT = Math.max(monFriHours - basicThreshold, 0);
-      if (monFriHours >= basicThreshold) {
-        // Threshold met — OT applies
-        basic = basicThreshold;
-        const satX15 = Math.min(saturdayHours, satX15Limit);
-        const satX20 = Math.max(saturdayHours - satX15Limit, 0);
-        x15 = monFriOT + satX15;
-        x20 = satX20 + sundayHours;
-      } else {
-        // Threshold not met — Fri/Sat/Sun fill basic, no OT
-        basic = Math.min(monFriHours + saturdayHours + sundayHours, basicThreshold);
-      }
-
-      // OT project breakdown from flagged entries, split by rate
+      // Per-project OT breakdown, built from the same numbers as the columns
+      // so the two can never disagree.
       const otProjectRateMap = new Map<string, { x15: number; x20: number }>();
+      const addOT = (proj: string, x15: number, x20: number) => {
+        const entry = otProjectRateMap.get(proj) ?? { x15: 0, x20: 0 };
+        entry.x15 += x15;
+        entry.x20 += x20;
+        otProjectRateMap.set(proj, entry);
+      };
+
       for (const e of empEntries) {
-        if (e.is_overtime && e.project_item !== "HOLIDAY-01" && e.project_item !== "SICK-01" && e.project_item !== "TRAINING-01") {
-          const hrs = Number(e.hours);
-          const dayOfWeek = new Date(e.work_date + "T00:00:00").getDay();
-          if (!otProjectRateMap.has(e.project_item)) otProjectRateMap.set(e.project_item, { x15: 0, x20: 0 });
-          const entry = otProjectRateMap.get(e.project_item)!;
-
-          if (dayOfWeek === 0) {
-            // Sunday — all x2.0
-            entry.x20 += hrs;
-          } else if (dayOfWeek === 6) {
-            // Saturday — tracked globally, attribute per-project proportionally later
-            // For now, all Sat OT goes into x15 bucket; we'll fix the split below
-            entry.x15 += hrs;
-          } else {
-            // Mon-Fri OT — all x1.5
-            entry.x15 += hrs;
-          }
-        }
+        if (!e.is_overtime) continue;
+        if (e.project_item === "SICK-01" || e.project_item === "HOLIDAY-01") continue;
+        const dayOfWeek = new Date(e.work_date + "T00:00:00").getDay();
+        if (dayOfWeek === 0) addOT(e.project_item, 0, Number(e.hours));
+        else if (dayOfWeek >= 1 && dayOfWeek <= 5) addOT(e.project_item, Number(e.hours), 0);
       }
 
-      // Fix Saturday split: redistribute Sat hours across projects proportionally
-      // Total sat x15 = satX15Limit (5h), rest is x2.0
-      if (saturdayHours > satX15Limit && monFriHours >= basicThreshold) {
-        // Gather all Sat OT hours per project
-        const satProjectHours = new Map<string, number>();
-        for (const e of empEntries) {
-          if (e.is_overtime && !["HOLIDAY-01", "SICK-01", "TRAINING-01"].includes(e.project_item)) {
-            const dayOfWeek = new Date(e.work_date + "T00:00:00").getDay();
-            if (dayOfWeek === 6) {
-              satProjectHours.set(e.project_item, (satProjectHours.get(e.project_item) ?? 0) + Number(e.hours));
-            }
-          }
-        }
-        // Proportionally split: first satX15Limit hours at x1.5, rest at x2.0
-        let remaining15 = satX15Limit;
-        for (const [proj, satHrs] of Array.from(satProjectHours.entries()).sort((a, b) => b[1] - a[1])) {
-          const entry = otProjectRateMap.get(proj);
-          if (!entry) continue;
-          // Remove the sat hours we initially put in x15
-          entry.x15 -= satHrs;
-          // Allocate to x1.5 up to remaining limit
-          const asX15 = Math.min(satHrs, remaining15);
-          const asX20 = satHrs - asX15;
-          entry.x15 += asX15;
-          entry.x20 += asX20;
-          remaining15 -= asX15;
-        }
+      // Saturday: the first satX15Limit flagged hours are 1.5x, the rest 2.0x.
+      // Allocate largest job first so the breakdown adds up to the columns.
+      let remaining15 = satX15Limit;
+      let satX15Hours = 0;
+      let satX20Hours = 0;
+      const satOrdered = Array.from(satOTByProject.entries()).sort(
+        (a, b) => b[1] - a[1] || a[0].localeCompare(b[0])
+      );
+      for (const [proj, satHrs] of satOrdered) {
+        const asX15 = Math.min(satHrs, remaining15);
+        const asX20 = satHrs - asX15;
+        remaining15 -= asX15;
+        satX15Hours += asX15;
+        satX20Hours += asX20;
+        addOT(proj, asX15, asX20);
       }
+
+      const x15 = monFriOTHours + satX15Hours;
+      const x20 = sundayOTHours + satX20Hours;
 
       let otProjects = "";
       if (otProjectRateMap.size > 0) {
         const parts = Array.from(otProjectRateMap.entries())
-          .sort((a, b) => (b[1].x15 + b[1].x20) - (a[1].x15 + a[1].x20))
+          .sort((a, b) => (b[1].x15 + b[1].x20) - (a[1].x15 + a[1].x20) || a[0].localeCompare(b[0]))
           .map(([proj, rates]) => {
             const segments: string[] = [];
-            if (rates.x15 > 0) segments.push(`${rates.x15}h @ 1.5x`);
-            if (rates.x20 > 0) segments.push(`${rates.x20}h @ 2x`);
+            if (rates.x15 > 0) segments.push(`${round2(rates.x15)}h @ 1.5x`);
+            if (rates.x20 > 0) segments.push(`${round2(rates.x20)}h @ 2x`);
             return `${proj} (${segments.join(", ")})`;
           });
         otProjects = "OT: " + parts.join(", ");
       }
 
+      // Premium hours the rules imply but which carry no flag: once the
+      // Mon–Fri threshold is met, the excess plus every weekend hour should
+      // be flagged against a job. Anything short of that is paid at basic.
+      const expectedOT =
+        monFriThresholdHours >= basicThreshold
+          ? monFriThresholdHours - basicThreshold + weekendWorkedHours
+          : 0;
+      const unflaggedOT = Math.max(round2(expectedOT - (x15 + x20)), 0);
+
       const manual = manualEntries.get(emp.id);
 
       return {
         employee: emp,
-        basic,
-        sick: sickHours,
-        holiday: holidayHours,
-        x15,
-        x20,
+        basic: round2(basic),
+        sick: round2(sickHours),
+        holiday: round2(holidayHours),
+        x15: round2(x15),
+        x20: round2(x20),
         otProjects,
+        unflaggedOT,
         furlough: manual?.furlough_hours ?? 0,
         travel: manual?.travel_hours ?? 0,
         bonus: manual?.bonus ?? 0,
@@ -400,7 +405,9 @@ export default function WagePrepPage() {
             />
           </div>
           <div className="text-xs text-gray-500">
-            Mon–Fri up to {basicThreshold}h = basic. If met: excess = x1.5, Sat first {satX15Limit}h = x1.5, Sat beyond = x2.0, Sun = x2.0
+            Hours are basic unless flagged as overtime on the timesheet. Flagged hours: Mon–Fri = x1.5,
+            Sat first {satX15Limit}h = x1.5, Sat beyond = x2.0, Sun = x2.0. The {basicThreshold}h Mon–Fri
+            threshold only decides which hours <em>should</em> be flagged.
           </div>
         </div>
       )}
@@ -531,6 +538,11 @@ export default function WagePrepPage() {
                   <td className="border px-3 py-1">
                     {row.otProjects && (
                       <div className="text-xs text-amber-600 mb-1">{row.otProjects}</div>
+                    )}
+                    {row.unflaggedOT > 0 && (
+                      <div className="text-xs text-red-600 mb-1" title="Flag these hours against a job on the timesheet to pay them at premium">
+                        ⚠ {row.unflaggedOT.toFixed(2)}h overtime not flagged — paid at basic
+                      </div>
                     )}
                     <input
                       type="text"

@@ -420,9 +420,12 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
   };
 
   // Calculate totals + overtime
-  // Basic = first 40h cumulative across Mon-Fri (excluding sick & holiday)
+  // Basic = first 40h cumulative across Mon-Fri. Holiday counts towards the
+  // hurdle, sick does not.
   // Once 40h hit: remaining hours that day + subsequent days = OT
   // Saturday: always OT if threshold met (first 5h x1.5, beyond x2.0)
+  // The wage sheet pays on the is_overtime flag, not on this calculation —
+  // it is what the flag-me warning below is measured against.
   const OT_HURDLE = 40;
   const NON_WORK_ITEMS = new Set(["SICK-01"]);
 
@@ -432,7 +435,7 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
   );
   const grandTotal = dayTotals.reduce((a, b) => a + b, 0);
 
-  // Working day totals (excluding sick & holiday, for OT threshold)
+  // Working day totals (excluding sick, for OT threshold)
   const dayWorkTotals = weekISOs.map((iso) =>
     rows.reduce((sum, row) => {
       if (NON_WORK_ITEMS.has(row.project_item)) return sum;
@@ -440,7 +443,7 @@ export function TimesheetGrid({ employee, monday, onApprovalChange }: Props) {
     }, 0)
   );
 
-  // Mon-Fri working hours (excludes sick/holiday)
+  // Mon-Fri hours counting towards the hurdle (excludes sick, includes holiday)
   const monFriWorkTotal = dayWorkTotals.slice(0, 5).reduce((a, b) => a + b, 0);
   const saturdayWorkTotal = dayWorkTotals[5] ?? 0;
   const thresholdMet = monFriWorkTotal >= OT_HURDLE;
