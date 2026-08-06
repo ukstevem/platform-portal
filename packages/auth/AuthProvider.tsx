@@ -57,7 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Profile row (optional)
       const { data: profile, error: profErr } = await supabase
         .from("auth_users")
-        .select("full_name,email")
+        .select("full_name,preferred_name,email")
         .eq("id", userId)
         .maybeSingle();
 
@@ -82,6 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           id: userId,
           email: resolvedEmail,
           fullName,
+          preferredName: profile?.preferred_name?.trim() || null,
         });
       }
 

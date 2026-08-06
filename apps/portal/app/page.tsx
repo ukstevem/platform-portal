@@ -4,12 +4,18 @@ import { useState } from "react";
 import { useAuth } from "@platform/auth/AuthProvider";
 import { AuthButton } from "@platform/auth/AuthButton";
 import { AmbientBackdrop } from "@platform/ui";
+import type { UserInfo } from "@platform/auth";
 
 function greeting() {
   const h = new Date().getHours();
   if (h < 12) return "Good morning";
   if (h < 18) return "Good afternoon";
   return "Good evening";
+}
+
+// A chosen friendly name wins; otherwise the first word of the full name.
+function firstName(user: UserInfo) {
+  return user.preferredName ?? user.fullName?.split(" ")[0] ?? null;
 }
 
 const apps = [
@@ -160,7 +166,7 @@ export default function PortalHome() {
             {new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}
           </div>
           <div className="text-[26px] font-bold mt-1.5 tracking-tight">
-            {greeting()}{user.fullName ? `, ${user.fullName.split(" ")[0]}` : ""}.
+            {greeting()}{firstName(user) ? `, ${firstName(user)}` : ""}.
           </div>
           <div className="text-sm mt-1" style={{ color: "#c2cce0" }}>
             Power System Services Platform

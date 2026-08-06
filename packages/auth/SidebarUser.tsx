@@ -18,7 +18,7 @@ export function SidebarUser() {
       <div className="flex items-center gap-1.5 mb-1">
         <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
         <span className="text-white/70 truncate text-[0.65rem]">
-          {user.fullName ?? user.email}
+          {user.preferredName ?? user.fullName ?? user.email}
         </span>
       </div>
       <button
