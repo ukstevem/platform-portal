@@ -28,6 +28,14 @@ export function useAuth() {
   return useContext(AuthContext);
 }
 
+// auth_users.full_name falls back to the email local part when the identity provider
+// gives the sync trigger no name it recognises, which renders as "firstname.surname".
+// Treat that as absent so a real name from user_metadata wins.
+function isEmailDerived(name: string, email: string | null) {
+  if (!email) return false;
+  return name.toLowerCase() === email.split("@")[0].toLowerCase();
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [isSuperuser, setIsSuperuser] = useState(false);
@@ -56,15 +64,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (profErr) console.error("auth_users profile load failed", profErr);
 
       const metaName = meta?.full_name ?? meta?.name ?? null;
+      const metaFullName =
+        (typeof metaName === "string" ? metaName.trim() : "") || null;
+      const profileFullName = profile?.full_name?.trim() || null;
+      const resolvedEmail = email ?? profile?.email ?? null;
+
       const fullName =
-        profile?.full_name?.trim() ||
-        (typeof metaName === "string" ? metaName.trim() : null) ||
+        (profileFullName && !isEmailDerived(profileFullName, resolvedEmail)
+          ? profileFullName
+          : null) ||
+        metaFullName ||
+        profileFullName ||
         null;
 
       if (!cancelled) {
         setUser({
           id: userId,
-          email: email ?? profile?.email ?? null,
+          email: resolvedEmail,
           fullName,
         });
       }
