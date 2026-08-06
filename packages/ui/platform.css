@@ -85,6 +85,27 @@ body {
   background: var(--pss-sky-pale);
 }
 
+/* Primary button for navy surfaces (sign-in card, hero), where .pss-btn is
+   navy-on-navy and disappears into the background. */
+.pss-btn-on-dark {
+  background: var(--pss-sky);
+  color: var(--pss-navy);
+  border: none;
+  border-radius: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.pss-btn-on-dark:hover {
+  background: var(--pss-sky-light);
+}
+.pss-btn-on-dark:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Active toggle state */
 .pss-toggle-active {
   background: var(--pss-navy) !important;

@@ -143,7 +143,7 @@ export default function PortalHome() {
               Sign in to access the PSS platform.
             </p>
             <div className="mt-6">
-              <AuthButton redirectTo="/auth/callback" />
+              <AuthButton redirectTo="/auth/callback" variant="onDark" />
             </div>
             <div className="border-t mt-6 pt-4 text-xs" style={{ borderColor: "#0c2d5a", color: "#5e7396" }}>
               PSS Power System Services · Internal use only

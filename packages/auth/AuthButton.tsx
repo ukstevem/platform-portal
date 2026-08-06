@@ -11,9 +11,18 @@ type Session = Awaited<
 type AuthButtonProps = {
   /** Where to redirect after login. Defaults to "/dashboard". */
   redirectTo?: string;
+  /**
+   * "onDark" for navy surfaces such as the portal sign-in card, where the
+   * navy .pss-btn would disappear into the background.
+   */
+  variant?: "primary" | "onDark";
 };
 
-export function AuthButton({ redirectTo = "/dashboard" }: AuthButtonProps) {
+export function AuthButton({
+  redirectTo = "/dashboard",
+  variant = "primary",
+}: AuthButtonProps) {
+  const buttonClass = variant === "onDark" ? "pss-btn-on-dark" : "pss-btn";
   const router = useRouter();
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
@@ -57,15 +66,30 @@ export function AuthButton({ redirectTo = "/dashboard" }: AuthButtonProps) {
     });
   }
 
-  if (loading) return <button disabled>Checking login...</button>;
+  if (loading)
+    return (
+      <button type="button" className={buttonClass} disabled>
+        Checking login...
+      </button>
+    );
+
   if (session)
-    return <div className="text-sm text-gray-600">Redirecting…</div>;
+    return (
+      <div
+        className="text-sm"
+        style={{
+          color: variant === "onDark" ? "var(--pss-sky-light)" : "#4b5563",
+        }}
+      >
+        Redirecting…
+      </div>
+    );
 
   return (
     <button
       type="button"
       onClick={handleLogin}
-      className="inline-flex items-center justify-center rounded-md border px-4 py-2 text-sm font-medium shadow-sm hover:opacity-90 cursor-pointer"
+      className={`inline-flex items-center justify-center ${buttonClass}`}
     >
       Sign in with Azure
     </button>
