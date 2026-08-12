@@ -50,7 +50,14 @@ networks:
 | 3015 | `welding-control`  | Welding Control    | `/welding-control/` | Pi (.75) | `pss-welding-control/app/` (standalone) |
 | 3016 | `nc1cad-app`       | NC1 → DXF UI        | `/nc1cad/`      | Pi (.75) | `pss-nc1cad-app/app/` (standalone, planned) |
 | 3017 | `purchase-order`   | Purchase Orders     | `/purchase-order/` | Pi (.75) | `pss-purchase-order/app/` (standalone) |
-| 3018 | *reserved*         | next standalone     | —               | —        | —                                    |
+| 3018 | `admin-ui`         | Estate Health       | `/admin/`       | Pi (.75) | `pss-admin-ui/app/` (standalone)     |
+| 3019 | *reserved*         | next standalone     | —               | —        | —                                    |
+
+> **`admin-ui` is the one row where the service name and the route differ.** The route is
+> `/admin/` because that is what people will type; the container is `admin-ui` because a
+> container called `admin` on a network shared by every PSS service is asking for a collision.
+> Routing is unaffected — the gateway reaches the 3010+ standalone apps by host IP, not by
+> Docker service name.
 
 ## Standalone vs monorepo — which wins?
 
