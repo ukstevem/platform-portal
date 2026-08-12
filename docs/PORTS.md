@@ -50,8 +50,27 @@ networks:
 | 3015 | `welding-control`  | Welding Control    | `/welding-control/` | Pi (.75) | `pss-welding-control/app/` (standalone) |
 | 3016 | `nc1cad-app`       | NC1 → DXF UI        | `/nc1cad/`      | Pi (.75) | `pss-nc1cad-app/app/` (standalone, planned) |
 | 3017 | `purchase-order`   | Purchase Orders     | `/purchase-order/` | Pi (.75) | `pss-purchase-order/app/` (standalone) |
-| 3018 | `admin-ui`         | Estate Health       | `/admin/`       | Pi (.75) | `pss-admin-ui/app/` (standalone)     |
-| 3019 | *reserved*         | next standalone     | —               | —        | —                                    |
+| 3018 | `wiki`             | PSS Wiki (BookStack)| `/wiki/`        | Pi (.75) | `pss-data-wiki/` (standalone)        |
+| 3019 | `admin-ui`         | Estate Health       | `/admin/`       | Pi (.75) | `pss-admin-ui/app/` (standalone)     |
+| 3020 | *reserved*         | next standalone     | —               | —        | —                                    |
+
+> **`wiki` has no nginx route yet.** It binds 3018 and its compose cites `/wiki/`, but
+> `production.conf` has no `location /wiki/` block, so it is unreachable through the gateway.
+> The registry reports this as `PORT-NO-ROUTE` (BD `PSS-Admin-4ud`) — correctly. The row is
+> recorded here anyway because **the port is genuinely taken**, and an unrecorded live port is
+> the more dangerous of the two problems.
+>
+> Keep annotations *out* of the table cells: the registry parses the Route column verbatim, so
+> a marker next to `/wiki/` becomes part of the route name and the drift report starts talking
+> about a route that does not exist.
+
+> **3018 was recorded late, and that is worth remembering.** `pss-data-wiki` binds
+> `"${WIKI_PORT}:80"` with `WIKI_PORT=3018`. Because the port is written as a *variable*, the
+> PSS-Admin registry's compose parser — which matched literal digits only — reported the wiki
+> as claiming no ports at all. PORTS.md showed 3018 as "reserved", the scanner agreed it was
+> free, and it was very nearly handed to a second app. The parser now resolves `${VAR}` from
+> the sibling `.env`/`.env.example` and reports anything it still cannot resolve as
+> `PORT-UNRESOLVED`. **A port claim the tooling cannot see is worse than one it gets wrong.**
 
 > **`admin-ui` is the one row where the service name and the route differ.** The route is
 > `/admin/` because that is what people will type; the container is `admin-ui` because a
