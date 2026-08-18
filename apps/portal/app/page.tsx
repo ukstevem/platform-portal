@@ -93,6 +93,11 @@ const apps = [
     description: "Surface similar past risks and issues during a new project's risk assessment.",
     disabled: true,
   },
+  {
+    name: "Wiki",
+    href: "/wiki/",
+    description: "Standard procedures, work instructions, and engineering reference data across all disciplines.",
+  },
 ];
 
 export default function PortalHome() {
