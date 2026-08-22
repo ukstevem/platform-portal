@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { PartViewer } from "./PartViewer";
 
 /**
  * The review queue.
@@ -61,6 +62,11 @@ export function ReviewQueue({ modelId }: { modelId: string }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [open, setOpen] = useState<Kind>("needs_type");
   const [sizes, setSizes] = useState<Record<string, string>>({});
+  // Selecting a part loads ONE mesh. Rendering all sixteen at once would mean
+  // sixteen meshes and, for this job, ~300 bodies before the reviewer looks at
+  // anything.
+  const [sel, setSel] = useState<string | null>(null);
+  const [busyNote, setBusyNote] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -77,20 +83,61 @@ export function ReviewQueue({ modelId }: { modelId: string }) {
 
   useEffect(() => { load(); }, [load]);
 
-  async function act(path: string, body: Record<string, unknown>, key: string) {
+  /** Poll a background job to completion. Bounded, because a hung job must not leave the
+   *  page spinning forever with no way to find out why. */
+  async function waitForJob(jobId: string, tries = 90): Promise<void> {
+    for (let i = 0; i < tries; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        const res = await fetch(`/cad-review/api/cad/jobs/${jobId}/`, { cache: "no-store" });
+        if (!res.ok) return;
+        const st = (await res.json())?.status;
+        if (st === "done" || st === "completed") return;
+        if (st === "failed" || st === "error") {
+          setErr("The parts were created, but producing their cut files failed.");
+          return;
+        }
+      } catch {
+        return;                       // service unreachable - load() will report it
+      }
+    }
+    setErr("Producing the new parts is taking longer than expected - reload to check.");
+  }
+
+  async function act(path: string, body: Record<string, unknown> | null, key: string,
+                     note?: string) {
     setBusy(key);
+    if (note) setBusyNote(note);
     try {
       const res = await fetch(`/cad-review/api/cad/models/${modelId}/${path}/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: body === null ? undefined : JSON.stringify(body),
       });
-      if (!res.ok) setErr(`${path} returned ${res.status}`);
-      else await load();
+      if (!res.ok) {
+        // Show what the service actually said. "explode returned 422" alone sends you to
+        // the wrong place; the detail says whether it is not a multi-body part at all.
+        let detail = "";
+        try { detail = (await res.json())?.detail ?? ""; } catch { /* not json */ }
+        setErr(`${path} returned ${res.status}${detail ? ` — ${detail}` : ""}`);
+      } else {
+        // Exploding replaces one row with its members and CHAINS A PRODUCE. Reloading
+        // straight away shows the members between the two: identified but with no cut file
+        // and, for a plate, no thickness yet - which reads as a queue full of review tasks
+        // that are really just work in progress. Wait for the job this action started.
+        let job: string | null = null;
+        try { job = (await res.json())?.produce_job_id ?? null; } catch { /* no body */ }
+        if (job) {
+          setBusyNote("Producing the new parts…");
+          await waitForJob(job);
+        }
+        setSel(null);
+        await load();
+      }
     } catch {
       setErr("Could not reach the CAD service");
     } finally {
-      setBusy(null);
+      setBusy(null); setBusyNote(null);
     }
   }
 
@@ -105,7 +152,7 @@ export function ReviewQueue({ modelId }: { modelId: string }) {
         {(Object.keys(KIND_LABEL) as Kind[]).map((k) => (
           <button
             key={k}
-            onClick={() => setOpen(k)}
+            onClick={() => { setOpen(k); setSel(null); }}
             className={`rounded-full px-3 py-1.5 text-sm border transition ${
               open === k
                 ? "bg-slate-900 text-white border-slate-900"
@@ -118,16 +165,25 @@ export function ReviewQueue({ modelId }: { modelId: string }) {
         ))}
       </div>
 
-      <p className="text-sm text-slate-500">{KIND_BLURB[open]}</p>
+      <p className="text-sm text-slate-500">
+        {KIND_BLURB[open]}{" "}
+        <span className="text-slate-400">Click a row to see the part.</span>
+      </p>
 
       {q.kinds[open].length === 0 ? (
         <p className="rounded-lg border border-slate-200 bg-white px-4 py-6 text-sm text-slate-500">
           Nothing here.
         </p>
       ) : (
-        <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
+      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_24rem]">
+        <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white self-start">
           {q.kinds[open].map((it) => (
-            <li key={it.fingerprint_key} className="px-4 py-3">
+            <li key={it.fingerprint_key}
+                onClick={() => setSel(it.fingerprint_key)}
+                className={`cursor-pointer border-l-4 px-4 py-3 transition ${
+                  sel === it.fingerprint_key
+                    ? "border-l-slate-900 bg-slate-100"
+                    : "border-l-transparent hover:border-l-slate-300 hover:bg-slate-50"}`}>
               <div className="flex items-start gap-4 flex-wrap">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
@@ -145,6 +201,9 @@ export function ReviewQueue({ modelId }: { modelId: string }) {
                         {it.n_solids} bodies
                       </span>
                     )}
+                    {busy === it.fingerprint_key && busyNote && (
+                      <span className="text-xs text-slate-500">{busyNote}</span>
+                    )}
                   </div>
                   {/* The CAD name is what ties this row back to the model and the drawing. */}
                   <div className="truncate text-sm text-slate-700">{it.name ?? ""}</div>
@@ -154,7 +213,8 @@ export function ReviewQueue({ modelId }: { modelId: string }) {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap"
+                     onClick={(e) => e.stopPropagation()}>
                   {open === "needs_size" && (
                     <>
                       <input
@@ -172,6 +232,36 @@ export function ReviewQueue({ modelId }: { modelId: string }) {
                         className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-40"
                       >
                         Set size
+                      </button>
+                    </>
+                  )}
+
+                  {/* A multi-body part is not a classification problem — it is an
+                      assembly the machine has not been told how to treat, so picking a type
+                      for a 30-body weld group answers the wrong question (bd j05, rl2).
+                      EXPLODE is the usual answer. "Bought in" is NOT a no-op just because
+                      the part is already whole: it records that this is purchased
+                      equipment, marks it bought so it stays on the BOM as a cost, stops
+                      identify drilling into its internals, and is learned by fingerprint so
+                      no later job asks again. That is what separates it from Exclude, which
+                      takes the part out of supply altogether. */}
+                  {(it.n_solids ?? 1) > 1 && open !== "confirmed" && open !== "excluded" && (
+                    <>
+                      <button
+                        disabled={busy === it.fingerprint_key}
+                        onClick={() => act(`explode/${it.fingerprint_key}`, null,
+                          it.fingerprint_key, "Exploding and re-producing…")}
+                        className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-40"
+                      >
+                        Explode
+                      </button>
+                      <button
+                        disabled={busy === it.fingerprint_key}
+                        onClick={() => act(`scope/part/${it.fingerprint_key}`,
+                          { treatment: "keep_whole" }, it.fingerprint_key)}
+                        className="rounded border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                      >
+                        Bought in
                       </button>
                     </>
                   )}
@@ -237,6 +327,11 @@ export function ReviewQueue({ modelId }: { modelId: string }) {
             </li>
           ))}
         </ul>
+
+        <div className="order-first md:order-none md:sticky md:top-4 h-[26rem] md:h-[32rem]">
+          <PartViewer modelId={modelId} fingerprintKey={sel} />
+        </div>
+      </div>
       )}
     </div>
   );

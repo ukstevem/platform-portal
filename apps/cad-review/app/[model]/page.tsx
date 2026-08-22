@@ -26,7 +26,7 @@ export default async function ModelReviewPage({
   const m = await getModel(model);
 
   return (
-    <main className="p-6 max-w-5xl">
+    <main className="p-6 max-w-[95rem]">
       <Link href="/" className="text-sm text-slate-500 hover:text-slate-800">
         ← all models
       </Link>
