@@ -42,6 +42,7 @@ networks:
 | 3006 | `laserquote`       | LaserQuote          | `/laserquote/`  | Pi (.75) | `platform-portal/apps/laserquote/`   |
 | 3007 | `assembly-viewer`  | Assembly Viewer     | `/assembly/`    | Pi (.75) | `platform-portal/apps/assembly-viewer/` |
 | 3008 | `nesting`          | Beam Nesting UI     | `/nesting/`     | Pi (.75) | `platform-portal/apps/nesting/`      |
+| 3009 | `cad-review`       | CAD Review          | `/cad-review/`  | Pi (.75) | `platform-portal/apps/cad-review/`   |
 | 3010 | `matl-cert`        | Material Certs      | `/matl-cert/`   | Pi (.75) | `pss-matl-cert/app/` (standalone)    |
 | 3011 | `employee-presence`| Employee Presence   | `/employee-presence/` | Pi (.75) | `pss-employee-presence/app/` (standalone) |
 | 3012 | `orderbook`        | Orderbook           | `/orderbook/`   | Pi (.75) | `pss-orderbook/app/` (standalone)    |
@@ -77,6 +78,14 @@ networks:
 > container called `admin` on a network shared by every PSS service is asking for a collision.
 > Routing is unaffected — the gateway reaches the 3010+ standalone apps by host IP, not by
 > Docker service name.
+
+> **3009 was an unrecorded gap, not a reservation.** The table ran 3008 -> 3010 with no
+> comment, so it was impossible to tell from here whether the number was free or had been
+> used and forgotten. It was claimed for `cad-review` on 2026-08-22 as the natural next
+> monorepo slot, after grepping every compose/conf/env in the tree found nothing bound to it.
+> **Worth confirming against a live host before deploy** - this file's own lesson is that a
+> port claim the tooling cannot see is worse than one it gets wrong, and an absent row proves
+> only that nobody wrote it down.
 
 ## Standalone vs monorepo — which wins?
 
