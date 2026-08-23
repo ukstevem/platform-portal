@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { Step, Unit } from "./types";
+import { DEFAULT_DEPTH, type Step, type Unit } from "./types";
 
 /**
  * Everything a step carries beyond "which pieces": the method text, who and what does it,
@@ -11,7 +11,8 @@ import type { Step, Unit } from "./types";
  * should not generate a request per character, and should not have to find a Save button
  * either.
  */
-export function StepEditor({ step, units, operations, onSave, onDelete, canExtend, onZoom }: {
+export function StepEditor({ step, units, operations, onSave, onDelete, canExtend, onZoom,
+                             onDepth, depthBusy }: {
   step: Step;
   units: Unit[];
   operations: readonly string[];
@@ -21,6 +22,10 @@ export function StepEditor({ step, units, operations, onSave, onDelete, canExten
   canExtend?: boolean;
   /** Frame the 3D view on this step's pieces. */
   onZoom?: () => void;
+  /** Move one piece a level finer or coarser. */
+  onDepth?: (unitPath: string, direction: "inside" | "wider") => void;
+  /** Piece currently mid-change, so its controls can be disabled. */
+  depthBusy?: string | null;
 }) {
   const [draft, setDraft] = useState<Step>(step);
   useEffect(() => setDraft(step), [step]);
@@ -142,14 +147,43 @@ export function StepEditor({ step, units, operations, onSave, onDelete, canExten
             </span>
           </div>
           <ul className="mt-1 space-y-0.5">
-            {units.map((u) => (
-              <li key={u.unit_path} className="flex items-baseline justify-between gap-2 text-xs">
-                <span className="truncate text-slate-700">{u.name}</span>
-                <span className="shrink-0 tabular-nums text-slate-500">
-                  {u.part_count}p · {Math.round(u.mass_kg).toLocaleString("en-GB")} kg
-                </span>
-              </li>
-            ))}
+            {units.map((u) => {
+              // Nothing may go wider than the default depth: one level above it is the
+              // model root, so the whole job would become a single lift.
+              const canWider = u.unit_path.split("/").length > DEFAULT_DEPTH;
+              const busy = depthBusy === u.unit_path;
+              return (
+                <li key={u.unit_path} className="flex items-center justify-between gap-2 text-xs">
+                  <span className="truncate text-slate-700" title={u.unit_path}>{u.name}</span>
+                  <span className="flex shrink-0 items-center gap-1">
+                    <span className="tabular-nums text-slate-500">
+                      {u.part_count}p · {Math.round(u.mass_kg).toLocaleString("en-GB")} kg
+                    </span>
+                    {onDepth && (
+                      <>
+                        <button
+                          onClick={() => onDepth(u.unit_path, "wider")}
+                          disabled={!canWider || !!depthBusy}
+                          title={canWider
+                            ? "Wider — put this back together with its siblings"
+                            : "Already the widest erection level"}
+                          className="ml-1 rounded border border-slate-300 px-1 leading-4 text-slate-600 hover:bg-white disabled:opacity-30"
+                        >−</button>
+                        <button
+                          onClick={() => onDepth(u.unit_path, "inside")}
+                          disabled={!u.splittable || !!depthBusy}
+                          title={u.splittable
+                            ? "Inside — break this into the pieces it is built from"
+                            : "Nothing deeper to open"}
+                          className="rounded border border-slate-300 px-1 leading-4 text-slate-600 hover:bg-white disabled:opacity-30"
+                        >+</button>
+                      </>
+                    )}
+                    {busy && <span className="text-slate-400">…</span>}
+                  </span>
+                </li>
+              );
+            })}
             {units.length === 0 && (
               <li className="text-xs text-amber-700">
                 No pieces resolve for this step — they may have been removed from the model.
@@ -160,6 +194,12 @@ export function StepEditor({ step, units, operations, onSave, onDelete, canExten
             <p className="mt-1.5 text-[11px] text-slate-500">
               Heaviest single piece {Math.round(heaviest).toLocaleString("en-GB")} kg — the
               figure that matters if these go up one at a time.
+            </p>
+          )}
+          {onDepth && (
+            <p className="mt-1.5 text-[11px] text-slate-500">
+              <b>+</b> opens a piece into what it is built from; <b>−</b> puts it back. The
+              steps come with it.
             </p>
           )}
           {canExtend && (

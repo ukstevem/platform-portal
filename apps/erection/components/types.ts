@@ -28,6 +28,13 @@ export type Unit = {
 
 export type StepItem = { unit_path: string };
 
+/**
+ * The erection unit's default depth — the root assembly's direct children. Mirrors
+ * DEFAULT_DEPTH in app/decide/erection.py. A piece at this depth cannot go wider: one
+ * level above is the model root, i.e. the whole job as a single lift.
+ */
+export const DEFAULT_DEPTH = 2;
+
 export type Step = {
   id: string;
   seq: number;

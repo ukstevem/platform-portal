@@ -40,6 +40,7 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const [mode, setMode] = useState<"record" | "review">("record");
   const [cursor, setCursor] = useState(0);        // index into steps, for review playback
@@ -180,6 +181,57 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
     } finally { setBusy(null); }
   }, [mode, steps, unitByPath, modelId, selectedStep]);
 
+  const [depthBusy, setDepthBusy] = useState<string | null>(null);
+  // Drag-and-drop reordering.
+  //
+  // The carried step lives in a REF as well as state. State drives the visual feedback,
+  // but the drop handler must not read it: dragstart and drop can land in the same React
+  // batch, and the drop closure then still sees null and silently does nothing. The ref is
+  // set synchronously, so the drop always knows what it is holding.
+  const dragIdRef = useRef<string | null>(null);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
+
+  /**
+   * Move one piece a level finer or coarser.
+   *
+   * The server does the whole thing — new palette AND the plan rebound onto it — so the
+   * client never holds a moment where the steps point at pieces that no longer exist.
+   */
+  const changeDepth = useCallback(async (unitPath: string, direction: "inside" | "wider") => {
+    setDepthBusy(unitPath);
+    try {
+      const d = await call<{
+        units: Unit[]; instance_units: Record<string, string>; plan: Plan;
+        rebound: { became: string[]; steps_touched: number; steps_removed: number };
+      }>(api(modelId, "depth/"), {
+        method: "POST",
+        body: JSON.stringify({ unit_path: unitPath, direction }),
+      });
+      setUnits(d.units);
+      setInstanceUnits(d.instance_units);
+      setPlan(d.plan);
+      // Follow the piece rather than leaving the selection on whatever index it was: after
+      // a collapse the step the planner was editing may not exist any more.
+      const landed = d.rebound.became[0];
+      const owning = d.plan.steps.find((st) => st.items.some((i) => i.unit_path === landed));
+      if (owning) {
+        setSelectedStep(owning.id);
+        if (mode === "review") setCursor(d.plan.steps.indexOf(owning));
+      }
+      if (d.rebound.steps_removed > 0) {
+        setNotice(`${d.rebound.steps_removed} step(s) emptied by that and were removed.`);
+      }
+    } catch (e) {
+      // The server refuses a depth change it cannot make cleanly (nothing deeper to open,
+      // already the widest level) and leaves the plan untouched — surface its reason.
+      const msg = e instanceof Error ? e.message : "Could not change the depth";
+      setError(msg.replace(/^\d+\s*/, "").replace(/^\{"detail":"?/, "").replace(/"?\}$/, ""));
+    } finally {
+      setDepthBusy(null);
+    }
+  }, [modelId, mode]);
+
   const move = useCallback(async (stepId: string, delta: number) => {
     const i = steps.findIndex((s) => s.id === stepId);
     const j = i + delta;
@@ -190,6 +242,26 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
     setPlan((p) => p && { ...p, steps: order.map((id, n) => {
       const s = steps.find((x) => x.id === id)!;
       return { ...s, seq: n + 1 };
+    }) });
+    try {
+      setPlan(await call<Plan>(api(modelId, "steps/order/"), {
+        method: "PUT", body: JSON.stringify({ step_ids: order }),
+      }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not reorder");
+      loadPlan();
+    }
+  }, [steps, modelId, loadPlan]);
+
+  /** Drop `stepId` at `toIndex`, keeping everything else in order. */
+  const moveTo = useCallback(async (stepId: string, toIndex: number) => {
+    const from = steps.findIndex((s) => s.id === stepId);
+    if (from < 0 || toIndex < 0 || toIndex >= steps.length || from === toIndex) return;
+    const order = steps.map((s) => s.id);
+    order.splice(toIndex, 0, order.splice(from, 1)[0]);
+    setPlan((p) => p && { ...p, steps: order.map((id, n) => {
+      const st = steps.find((x) => x.id === id)!;
+      return { ...st, seq: n + 1 };
     }) });
     try {
       setPlan(await call<Plan>(api(modelId, "steps/order/"), {
@@ -361,7 +433,7 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
         <span className="text-xs text-slate-500">
           {mode === "record"
             ? "Click pieces in the 3D view in the order they go up. Click again to take one back out; shift-click to add it to the selected step as one lift."
-            : "Scrub the sequence. ← → to step."}
+            : "Scrub the sequence. ← → to step. Drag a step to reorder it."}
         </span>
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -393,6 +465,15 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
         <div className="flex items-start gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           <span className="flex-1">{error}</span>
           <button onClick={() => setError(null)} className="text-amber-700 hover:text-amber-950">×</button>
+        </div>
+      )}
+
+      {/* A depth change can delete steps. Say so — steps vanishing unannounced reads as
+          data loss even when it is exactly what was asked for. */}
+      {notice && (
+        <div className="flex items-start gap-3 rounded-md border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+          <span className="flex-1">{notice}</span>
+          <button onClick={() => setNotice(null)} className="text-slate-500 hover:text-slate-900">×</button>
         </div>
       )}
 
@@ -483,12 +564,48 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
                 return (
                   <li
                     key={s.id}
+                    draggable
+                    onDragStart={(e) => {
+                      dragIdRef.current = s.id;
+                      setDragId(s.id);
+                      e.dataTransfer.effectAllowed = "move";
+                      // Firefox will not start a drag without data on the transfer.
+                      e.dataTransfer.setData("text/plain", s.id);
+                    }}
+                    onDragOver={(e) => {
+                      if (!dragIdRef.current) return;
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "move";
+                      if (overIndex !== i) setOverIndex(i);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const held = dragIdRef.current;
+                      dragIdRef.current = null;
+                      if (held) moveTo(held, i);
+                      setDragId(null);
+                      setOverIndex(null);
+                    }}
+                    onDragEnd={() => {
+                      dragIdRef.current = null;
+                      setDragId(null);
+                      setOverIndex(null);
+                    }}
                     onClick={() => { setSelectedStep(s.id); setMode("review"); setCursor(i); }}
                     className={`cursor-pointer px-3 py-2 transition ${
+                      dragId === s.id ? "opacity-40" : ""
+                    } ${
+                      overIndex === i && dragId && dragId !== s.id
+                        ? "border-t-2 border-orange-500" : ""
+                    } ${
                       isNow ? "bg-orange-50" : selectedStep === s.id ? "bg-slate-50" : "hover:bg-slate-50"
                     }`}
                   >
                     <div className="flex items-start gap-2">
+                      <span
+                        className="mt-0.5 cursor-grab select-none text-xs text-slate-300 active:cursor-grabbing"
+                        title="Drag to reorder"
+                      >⠿</span>
                       <span className={`mt-0.5 w-6 shrink-0 text-right text-xs font-semibold tabular-nums ${
                         isNow ? "text-orange-600" : "text-slate-400"}`}>{s.seq}</span>
                       <div className="min-w-0 flex-1">
@@ -531,6 +648,8 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
               onDelete={() => removeStep(editing.id)}
               canExtend={mode === "record"}
               onZoom={() => viewer.current?.focus(editing.items.map((i) => i.unit_path))}
+              onDepth={changeDepth}
+              depthBusy={depthBusy}
             />
           ) : (
             <div className="rounded-lg border border-dashed border-slate-300 bg-white px-3 py-4 text-center text-sm text-slate-400">

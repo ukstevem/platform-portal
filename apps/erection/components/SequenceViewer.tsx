@@ -29,6 +29,8 @@ export type ViewerHandle = {
    */
   capture: (opts?: { print?: boolean }) => string | null;
   setView: (v: "iso" | "front" | "side" | "top") => void;
+  /** Regroup the drawn meshes after a depth change, without refetching geometry. */
+  remap: (instanceUnits: Record<string, string>, states: Record<string, UnitState>) => void;
   /** Frame the camera on one piece, so a step's subject is actually visible. */
   focus: (unitPaths: string[]) => void;
   reset: () => void;
@@ -118,6 +120,7 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
   const scene = useRef<{
     dispose: () => void;
     recolour: (s: Record<string, UnitState>) => void;
+    remap: (m: Record<string, string>, states: Record<string, UnitState>) => void;
     capture: (opts?: { print?: boolean }) => string | null;
     setView: (v: string) => void;
     focus: (paths: string[]) => void;
@@ -148,6 +151,7 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
   useImperativeHandle(ref, () => ({
     capture: (opts) => scene.current?.capture(opts) ?? null,
     setView: (v) => scene.current?.setView(v),
+    remap: (m, states) => scene.current?.remap(m, states),
     focus: (paths) => scene.current?.focus(paths),
     reset: () => scene.current?.reset(),
   }), []);
@@ -243,6 +247,11 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
     // handful of material writes rather than a walk over thousands of meshes.
     const materials = new Map<string, InstanceType<typeof THREE.MeshLambertMaterial>>();
     const unitBoxes = new Map<string, InstanceType<typeof THREE.Box3>>();
+    // Every drawn mesh with the instance it came from. Changing a piece's DEPTH changes
+    // which unit an instance belongs to but not its geometry, so this lets the scene be
+    // regrouped in place instead of refetching 148 meshes — a rebuild costs ~33s, which
+    // would make the depth control unusable.
+    const drawn: { mesh: InstanceType<typeof THREE.Mesh>; instanceId: string }[] = [];
     let unmeshed = 0;
 
     for (const inst of instances) {
@@ -274,6 +283,7 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
         }
         mesh.userData.unit = unit;
         root.add(mesh);
+        drawn.push({ mesh, instanceId: inst.instance_id });
 
         const box = new THREE.Box3().setFromObject(mesh);
         const existing = unitBoxes.get(unit);
@@ -379,6 +389,39 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
         materials.forEach((m) => m.dispose());
         renderer.dispose();
       },
+      remap: (map, states) => {
+        // Reassign every mesh to its new unit's material. Geometry, placements and the
+        // camera are untouched — only the grouping changed.
+        const fresh = new Map<string, InstanceType<typeof THREE.MeshLambertMaterial>>();
+        unitBoxes.clear();
+        for (const { mesh, instanceId } of drawn) {
+          const unit = map[instanceId];
+          if (!unit) continue;
+          let mat = fresh.get(unit);
+          if (!mat) {
+            // Reuse the existing material where the unit survived the change, so its
+            // current colour does not flash before the recolour below lands.
+            mat = materials.get(unit) ?? new THREE.MeshLambertMaterial({
+              color: STATE_COLOUR.future, transparent: true, opacity: STATE_OPACITY.future,
+            });
+            fresh.set(unit, mat);
+          }
+          mesh.material = mat;
+          mesh.userData.unit = unit;
+          const box = new THREE.Box3().setFromObject(mesh);
+          const existing = unitBoxes.get(unit);
+          if (existing) existing.union(box);
+          else unitBoxes.set(unit, box.clone());
+        }
+        // Dispose materials for units that no longer exist, or a long session of depth
+        // changes leaks one GPU material per abandoned piece.
+        for (const [unit, mat] of materials) {
+          if (!fresh.has(unit)) mat.dispose();
+        }
+        materials.clear();
+        for (const [unit, mat] of fresh) materials.set(unit, mat);
+        scene.current?.recolour(states);
+      },
       recolour: (states) => {
         lastStates = states;
         materials.forEach((mat, unit) => {
@@ -467,11 +510,11 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
 
     scene.current.recolour(stateByUnit);
     setStatus("ready");
-    // stateByUnit is applied here on first build and by the effect below thereafter; it is
-    // deliberately not a dependency, or every step change would rebuild the whole scene.
-    // unitsSig stands in for instanceUnits — see signature().
+    // Only modelId rebuilds. stateByUnit is applied here and by the recolour effect below;
+    // instanceUnits changes are handled by the remap effect, which regroups the meshes
+    // already on the GPU rather than refetching them.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modelId, unitsSig]);
+  }, [modelId]);
 
   useEffect(() => {
     build();
@@ -481,6 +524,22 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
   useEffect(() => {
     scene.current?.recolour(stateByUnit);
   }, [stateByUnit]);
+
+  // A depth change rewrites which unit each instance belongs to. Regroup in place — the
+  // geometry is identical, and a rebuild would cost the full mesh fetch (~33s) for what is
+  // really just a change of grouping. Skipped on the first pass: the build already applied
+  // the map it was given.
+  const builtSig = useRef<string | null>(null);
+  useEffect(() => {
+    if (status !== "ready") return;
+    if (builtSig.current === null) { builtSig.current = unitsSig; return; }
+    if (builtSig.current === unitsSig) return;
+    builtSig.current = unitsSig;
+    scene.current?.remap(instanceUnits, stateByUnit);
+    // stateByUnit is read for the repaint that follows the regroup; it must not re-trigger
+    // this effect, which is keyed on the mapping alone.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unitsSig, status]);
 
   return (
     <div className={`relative overflow-hidden rounded-lg border border-slate-700 bg-[#111820] ${className ?? ""}`}>
