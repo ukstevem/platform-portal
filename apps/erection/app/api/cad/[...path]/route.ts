@@ -14,6 +14,32 @@ import { NextRequest, NextResponse } from "next/server";
 const CAD_SERVICE_URL =
   process.env.CAD_SERVICE_URL ?? "http://host.docker.internal:8001";
 
+/**
+ * Retry a CONNECTION failure, not an HTTP status.
+ *
+ * The 3D view fetches one mesh per prototype, several at a time, and under that
+ * concurrency the hop to the CAD service intermittently drops the connection — measured at
+ * 3 failures in 24 requests, six in flight. Each one became a 502 and a piece of steel
+ * silently missing from the structure, which is the one thing this viewer must never do.
+ *
+ * A non-2xx response is a real answer and is passed straight back: a 404 or a 422 means
+ * something, and retrying it would just delay the message.
+ */
+async function fetchWithRetry(url: string, init: RequestInit, attempts = 3) {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fetch(url, init);
+    } catch (err) {
+      lastErr = err;
+      // A body can only be consumed once, so a request that carries one cannot be replayed.
+      if (init.body != null) break;
+      await new Promise((r) => setTimeout(r, 120 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 async function forward(req: NextRequest, path: string[]) {
   const search = req.nextUrl.search ?? "";
   const url = `${CAD_SERVICE_URL}/api/v1/${path.join("/")}${search}`;
@@ -26,7 +52,7 @@ async function forward(req: NextRequest, path: string[]) {
     init.body = await req.text();
   }
   try {
-    const res = await fetch(url, init);
+    const res = await fetchWithRetry(url, init);
     const body = await res.arrayBuffer();
     const headers: Record<string, string> = {
       "Content-Type": res.headers.get("content-type") ?? "application/json",

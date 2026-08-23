@@ -15,11 +15,13 @@ import {
  * Colour is the entire language of the view:
  *   erected      what is already standing when this step starts — solid, muted
  *   current      what this step puts up — bright, and the only thing that reads as "now"
+ *   picked       ticked for moving into its own lift — must be told apart from the rest of
+ *                the step it is still in, or you cannot see what you have chosen
  *   future       not yet erected — ghosted, so context is visible without competing
  *   unsequenced  in the model but in no step — amber, because that is a planning gap
  */
 
-export type UnitState = "erected" | "current" | "future" | "unsequenced";
+export type UnitState = "erected" | "current" | "picked" | "future" | "unsequenced";
 
 export type ViewerHandle = {
   /**
@@ -46,6 +48,7 @@ type Inst = {
 const STATE_COLOUR: Record<UnitState, number> = {
   erected: 0x8b98a5,
   current: 0xf97316,
+  picked: 0x22d3ee,     // cyan — reads clearly against the orange of the step it sits in
   future: 0x2f3f4d,
   unsequenced: 0xd9a441,
 };
@@ -53,6 +56,7 @@ const STATE_COLOUR: Record<UnitState, number> = {
 const STATE_OPACITY: Record<UnitState, number> = {
   erected: 1,
   current: 1,
+  picked: 1,
   future: 0.12,
   unsequenced: 0.55,
 };
@@ -64,12 +68,16 @@ const PRINT_BG = 0xf4f6f8;
 const PRINT_COLOUR: Record<UnitState, number> = {
   erected: 0x6b7885,
   current: 0xe4610f,
+  // Picking is an authoring state, never a documented one — a printed sheet shows the lift
+  // as it will be built, not what happened to be ticked when the PDF was made.
+  picked: 0xe4610f,
   future: 0xc3ccd4,
   unsequenced: 0xc99a2e,
 };
 const PRINT_OPACITY: Record<UnitState, number> = {
   erected: 1,
   current: 1,
+  picked: 1,
   future: 0.4,
   unsequenced: 0.75,
 };
@@ -223,13 +231,24 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
         const i = cursor++;
         if (i >= keys.length) return;
         const k = keys[i];
-        try {
-          const m = await fetch(
-            `/erection/api/cad/models/${modelId}/prototype/${k}/mesh/?lod=5`,
-            { cache: "force-cache" });
-          if (m.ok) geo.set(k, (await m.json()).bodies ?? []);
-        } catch {
-          /* one unmeshable body must not lose the whole structure */
+        // Retry a failed mesh: a dropped fetch here is a piece of steel missing from the
+        // structure, and a viewer that quietly omits parts is worse than one that fails
+        // loudly. The proxy retries the connection too; this covers the rest.
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            const m = await fetch(
+              `/erection/api/cad/models/${modelId}/prototype/${k}/mesh/?lod=5`,
+              { cache: "force-cache" });
+            if (m.ok) {
+              geo.set(k, (await m.json()).bodies ?? []);
+              break;
+            }
+            // 4xx is a real answer — the prototype has no mesh. Retrying wastes time.
+            if (m.status < 500) break;
+          } catch {
+            /* fall through to the retry */
+          }
+          if (attempt < 2) await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
         }
         done++;
         if (done % 5 === 0 || done === keys.length) setProgress({ done, total: keys.length });

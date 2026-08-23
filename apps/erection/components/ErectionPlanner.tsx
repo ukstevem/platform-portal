@@ -46,6 +46,11 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
   const [cursor, setCursor] = useState(0);        // index into steps, for review playback
   const [selectedStep, setSelectedStep] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
+  // Pieces ticked for moving out of the selected step, and whether the 3D view is currently
+  // driving that selection. Held here rather than in the editor because the viewer feeds it,
+  // and declared before `pick` so the click handler can read it.
+  const [selectedPieces, setSelectedPieces] = useState<Set<string>>(new Set());
+  const [pick3d, setPick3d] = useState(false);
 
   const steps: Step[] = useMemo(() => plan?.steps ?? [], [plan]);
   const stepListRef = useRef<HTMLUListElement>(null);
@@ -91,8 +96,14 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
       const st: UnitState = i < shownIndex ? "erected" : i === shownIndex ? "current" : "future";
       for (const it of s.items) out[it.unit_path] = st;
     });
+    // Ticked pieces last, so a selection is visible whichever step it belongs to. Without
+    // this every piece of a 102-piece lift is the same orange and you cannot see what you
+    // have chosen — which is most of the point of picking in the view at all.
+    for (const path of selectedPieces) {
+      if (out[path]) out[path] = "picked";
+    }
     return out;
-  }, [units, steps, shownIndex]);
+  }, [units, steps, shownIndex, selectedPieces]);
 
   const totals = useMemo(() => {
     const sequenced = new Set(steps.flatMap((s) => s.items.map((i) => i.unit_path)));
@@ -117,6 +128,22 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
   const pick = useCallback(async (unitPath: string, opts?: { shift: boolean }) => {
     const u = unitByPath[unitPath];
     if (!u) return;
+
+    // Picking a lift out of an opened assembly: a click ticks the piece rather than doing
+    // anything to the plan. Only pieces of the step being edited can be ticked — clicking
+    // elsewhere in the structure would otherwise silently build a selection you cannot see.
+    if (pick3d && selectedStep) {
+      const step = steps.find((s) => s.id === selectedStep);
+      if (step?.items.some((i) => i.unit_path === unitPath)) {
+        setSelectedPieces((prev) => {
+          const next = new Set(prev);
+          if (next.has(unitPath)) next.delete(unitPath);
+          else next.add(unitPath);
+          return next;
+        });
+      }
+      return;
+    }
 
     // Shift = "same lift as the selected step" rather than "the next step".
     if (mode === "record" && opts?.shift && selectedStep) {
@@ -179,7 +206,7 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not add the step");
     } finally { setBusy(null); }
-  }, [mode, steps, unitByPath, modelId, selectedStep]);
+  }, [mode, steps, unitByPath, modelId, selectedStep, pick3d]);
 
   const [depthBusy, setDepthBusy] = useState<string | null>(null);
   // Drag-and-drop reordering.
@@ -273,6 +300,38 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
     }
   }, [steps, modelId, loadPlan]);
 
+  /**
+   * Move some of a step's pieces into their own lift.
+   *
+   * The sub-assembly this creates does not exist in the CAD — a big assembly's tree is
+   * usually flat, so there is no five-or-six-way grouping to discover. The planner draws it.
+   */
+  const splitOut = useCallback(async (stepId: string, unitPaths: string[]) => {
+    if (unitPaths.length === 0) return;
+    setBusy("splitting");
+    try {
+      const d = await call<{ plan: Plan; new_step_id: string; moved: number;
+                            source_removed: number }>(
+        api(modelId, `steps/${stepId}/split-out/`), {
+          method: "POST",
+          body: JSON.stringify({ unit_paths: unitPaths, title: null }),
+        });
+      setPlan(d.plan);
+      // Land on the new lift so it can be named straight away — that is the next thing
+      // anyone wants to do with it.
+      setSelectedStep(d.new_step_id);
+      const idx = d.plan.steps.findIndex((st) => st.id === d.new_step_id);
+      if (idx >= 0 && mode === "review") setCursor(idx);
+      if (d.source_removed) {
+        setNotice("That was every piece, so the step it came from was removed.");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not move those pieces");
+    } finally {
+      setBusy(null);
+    }
+  }, [modelId, mode]);
+
   const removeStep = useCallback(async (stepId: string) => {
     setBusy("updating");
     try {
@@ -327,6 +386,9 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
     const s = steps[cursor];
     if (s) setSelectedStep(s.id);
   }, [cursor, mode, steps]);
+
+  // A tick set carried over from another step would move the wrong steel.
+  useEffect(() => { setSelectedPieces(new Set()); setPick3d(false); }, [selectedStep]);
 
   // Keep the list on the step the viewer is showing. Scrubbing to step 34 of 67 while the
   // list sits at step 1 means the two halves of the screen describe different moments.
@@ -540,9 +602,12 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
           </div>
         </div>
 
-        {/* steps + editor */}
+        {/* Steps + editor.
+            The list keeps a floor and the editor a ceiling, so opening a step can never
+            push the sequence off the screen — which is exactly what it did when the editor
+            was free to grow with a hundred-piece lift. */}
         <div className="flex min-h-0 flex-col gap-3">
-          <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-slate-200 bg-white">
+          <div className="min-h-[12rem] flex-1 overflow-auto rounded-lg border border-slate-200 bg-white">
             <div className="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <span>Sequence</span>
               <span>{steps.length} step{steps.length === 1 ? "" : "s"}</span>
@@ -650,9 +715,14 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
               onZoom={() => viewer.current?.focus(editing.items.map((i) => i.unit_path))}
               onDepth={changeDepth}
               depthBusy={depthBusy}
+              onSplitOut={(paths) => splitOut(editing.id, paths)}
+              selected={selectedPieces}
+              setSelected={setSelectedPieces}
+              pick3d={pick3d}
+              setPick3d={setPick3d}
             />
           ) : (
-            <div className="rounded-lg border border-dashed border-slate-300 bg-white px-3 py-4 text-center text-sm text-slate-400">
+            <div className="shrink-0 rounded-lg border border-dashed border-slate-300 bg-white px-3 py-4 text-center text-sm text-slate-400">
               Select a step to add method notes, plant, crew and hold points.
             </div>
           )}
