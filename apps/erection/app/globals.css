@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+/* Tailwind v4 auto-detects sources, and on this app it did not pick up the app's own
+   files: the generated sheet carried `.flex` (from the @source'd packages below) but no
+   `grid-template-columns`, `h-full` or `border-l-4`. The layout classes simply did not
+   exist, so the page rendered as unstyled text and the 3D panel had no height to draw in.
+   Declaring the app's own trees explicitly removes the guesswork. */
+@source "../app";
+@source "../components";
+
+@source "../../../packages/ui";
+@source "../../../packages/auth";
+@import "@platform/ui/platform.css";

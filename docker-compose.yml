@@ -188,7 +188,37 @@ services:
       - nesting_root_nm:/repo/node_modules
       - nesting_node_modules:/repo/apps/nesting/node_modules
 
+  erection:
+    build:
+      context: .
+      dockerfile: docker/node/Dockerfile.dev
+    container_name: platform_erection
+    working_dir: /repo
+    env_file: .env.development
+    environment:
+      # NO WATCHPACK_POLLING here, deliberately. On this Windows bind mount polling fires
+      # phantom change events, and Turbopack Fast-Refreshes in a continuous loop (seen:
+      # "[Fast Refresh] rebuilding" every ~200ms with nothing edited). That remounts the
+      # viewer and cancels its in-flight scene build every time, so the 3D view never
+      # finishes loading and renders black. Polling buys nothing to offset it — Turbopack
+      # is blind to bind-mount edits either way (bd 5kp), so a code change needs
+      # `docker restart platform_erection` regardless.
+      # stage3 runs on the dev host, not on platform_net yet.
+      CAD_SERVICE_URL: ${CAD_SERVICE_URL:-http://host.docker.internal:8001}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command:
+      ["sh", "-lc", "corepack enable && corepack prepare pnpm@9.15.0 --activate && pnpm install && pnpm -C apps/erection dev --hostname 0.0.0.0 --port 3012"]
+    volumes:
+      - ./:/repo
+      - erection_pnpm_store:/repo/.pnpm-store
+      - erection_root_nm:/repo/node_modules
+      - erection_node_modules:/repo/apps/erection/node_modules
+
 volumes:
+  erection_pnpm_store:
+  erection_root_nm:
+  erection_node_modules:
   portal_pnpm_store:
   portal_root_nm:
   portal_node_modules:
