@@ -391,8 +391,19 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
     return () => clearTimeout(t);
   }, [playing, cursor, steps.length, mode]);
 
+  // Scrubbing selects the step being shown — but ONLY when the scrubber actually moves.
+  //
+  // This used to re-run whenever `steps` changed, and every rename, split-out, depth change
+  // and reorder rewrites `steps`. So the moment you edited anything the selection was
+  // re-asserted onto whatever the scrubber happened to point at, and the editor silently
+  // rebound to a different step. Typing a title then saved it to that other step: the lift
+  // you were looking at kept its old name and some unrelated step got renamed. It read
+  // exactly like "my changes don't persist".
+  const syncedCursor = useRef<number | null>(null);
   useEffect(() => {
-    if (mode !== "review") return;
+    if (mode !== "review") { syncedCursor.current = null; return; }
+    if (syncedCursor.current === cursor) return;
+    syncedCursor.current = cursor;
     const s = steps[cursor];
     if (s) setSelectedStep(s.id);
   }, [cursor, mode, steps]);
