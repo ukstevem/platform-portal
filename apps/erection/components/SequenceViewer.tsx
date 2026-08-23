@@ -17,11 +17,14 @@ import {
  *   current      what this step puts up — bright, and the only thing that reads as "now"
  *   picked       ticked for moving into its own lift — must be told apart from the rest of
  *                the step it is still in, or you cannot see what you have chosen
+ *   current-muted the rest of that step while a selection is being made. Three picked pieces
+ *                in a hundred-piece lift are a few pixels; dropping the rest back is what
+ *                makes them findable without zooming in
  *   future       not yet erected — ghosted, so context is visible without competing
  *   unsequenced  in the model but in no step — amber, because that is a planning gap
  */
 
-export type UnitState = "erected" | "current" | "picked" | "future" | "unsequenced";
+export type UnitState = "erected" | "current" | "current-muted" | "picked" | "future" | "unsequenced";
 
 export type ViewerHandle = {
   /**
@@ -48,6 +51,7 @@ type Inst = {
 const STATE_COLOUR: Record<UnitState, number> = {
   erected: 0x8b98a5,
   current: 0xf97316,
+  "current-muted": 0x7a4a24,
   picked: 0x22d3ee,     // cyan — reads clearly against the orange of the step it sits in
   future: 0x2f3f4d,
   unsequenced: 0xd9a441,
@@ -56,6 +60,7 @@ const STATE_COLOUR: Record<UnitState, number> = {
 const STATE_OPACITY: Record<UnitState, number> = {
   erected: 1,
   current: 1,
+  "current-muted": 0.45,
   picked: 1,
   future: 0.12,
   unsequenced: 0.55,
@@ -70,6 +75,7 @@ const PRINT_COLOUR: Record<UnitState, number> = {
   current: 0xe4610f,
   // Picking is an authoring state, never a documented one — a printed sheet shows the lift
   // as it will be built, not what happened to be ticked when the PDF was made.
+  "current-muted": 0xe4610f,
   picked: 0xe4610f,
   future: 0xc3ccd4,
   unsequenced: 0xc99a2e,
@@ -77,6 +83,7 @@ const PRINT_COLOUR: Record<UnitState, number> = {
 const PRINT_OPACITY: Record<UnitState, number> = {
   erected: 1,
   current: 1,
+  "current-muted": 1,
   picked: 1,
   future: 0.4,
   unsequenced: 0.75,

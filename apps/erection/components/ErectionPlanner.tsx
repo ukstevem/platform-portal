@@ -99,11 +99,21 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
     // Ticked pieces last, so a selection is visible whichever step it belongs to. Without
     // this every piece of a 102-piece lift is the same orange and you cannot see what you
     // have chosen — which is most of the point of picking in the view at all.
-    for (const path of selectedPieces) {
-      if (out[path]) out[path] = "picked";
+    //
+    // While a selection is being made, the REST of that step drops back too. Three picked
+    // pieces in a hundred-piece lift are a handful of pixels against a wall of orange;
+    // muting their neighbours is what makes them findable without zooming in.
+    if (selectedPieces.size > 0) {
+      const step = steps.find((s) => s.id === selectedStep);
+      for (const it of step?.items ?? []) {
+        if (out[it.unit_path] === "current") out[it.unit_path] = "current-muted";
+      }
+      for (const path of selectedPieces) {
+        if (out[path]) out[path] = "picked";
+      }
     }
     return out;
-  }, [units, steps, shownIndex, selectedPieces]);
+  }, [units, steps, shownIndex, selectedPieces, selectedStep]);
 
   const totals = useMemo(() => {
     const sequenced = new Set(steps.flatMap((s) => s.items.map((i) => i.unit_path)));

@@ -140,18 +140,30 @@ export function StepEditor({ step, units, operations, onSave, onDelete, canExten
               const canWider = u.unit_path.split("/").length > DEFAULT_DEPTH;
               const busy = depthBusy === u.unit_path;
               const ticked = selected.has(u.unit_path);
+              const selectable = !!onSplitOut && units.length > 1;
+              const toggle = () => {
+                if (!selectable) return;
+                const next = new Set(selected);
+                if (next.has(u.unit_path)) next.delete(u.unit_path);
+                else next.add(u.unit_path);
+                setSelected(next);
+              };
               return (
-                <li key={u.unit_path} className="flex items-center gap-1.5 text-xs">
-                  {onSplitOut && units.length > 1 && (
+                // The whole row toggles, not just the checkbox: "select a piece" should work
+                // wherever you click it, and a 4-pixel box is a poor target in a long list.
+                <li
+                  key={u.unit_path}
+                  onClick={selectable ? toggle : undefined}
+                  className={`flex items-center gap-1.5 rounded text-xs ${
+                    selectable ? "cursor-pointer" : ""
+                  } ${ticked ? "bg-cyan-50 ring-1 ring-cyan-300" : selectable ? "hover:bg-white" : ""}`}
+                >
+                  {selectable && (
                     <input
                       type="checkbox"
                       checked={ticked}
-                      onChange={(e) => {
-                        const next = new Set(selected);
-                        if (e.target.checked) next.add(u.unit_path);
-                        else next.delete(u.unit_path);
-                        setSelected(next);
-                      }}
+                      onChange={toggle}
+                      onClick={(e) => e.stopPropagation()}
                       className="shrink-0"
                     />
                   )}
@@ -164,7 +176,7 @@ export function StepEditor({ step, units, operations, onSave, onDelete, canExten
                   {onDepth && (
                     <span className="flex shrink-0 items-center gap-0.5">
                       <button
-                        onClick={() => onDepth(u.unit_path, "inside")}
+                        onClick={(e) => { e.stopPropagation(); onDepth(u.unit_path, "inside"); }}
                         disabled={!u.splittable || !!depthBusy}
                         title={u.splittable
                           ? "Open this piece into what it is built from"
@@ -172,7 +184,7 @@ export function StepEditor({ step, units, operations, onSave, onDelete, canExten
                         className="rounded border border-slate-300 px-1 py-0.5 text-[10px] leading-none text-slate-600 hover:bg-white disabled:opacity-25"
                       >Open</button>
                       <button
-                        onClick={() => onDepth(u.unit_path, "wider")}
+                        onClick={(e) => { e.stopPropagation(); onDepth(u.unit_path, "wider"); }}
                         disabled={!canWider || !!depthBusy}
                         title={canWider
                           ? "Put this back together with its siblings"
@@ -201,8 +213,8 @@ export function StepEditor({ step, units, operations, onSave, onDelete, canExten
           {onDepth && (
             <p className="mt-1.5 text-[11px] text-slate-500">
               <b>Open</b> breaks a piece into what it is built from, <b>Close</b> puts it
-              back. Opening does not split the lift — tick the pieces that travel together
-              and move them out to do that.
+              back. Opening does not split the lift — click the pieces that travel together
+              (they turn cyan in the 3D view) and move them out to do that.
             </p>
           )}
           {canExtend && (
