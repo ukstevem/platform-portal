@@ -95,6 +95,16 @@ const PRINT_OPACITY: Record<UnitState, number> = {
 const MESH_CONCURRENCY = 6;
 
 /**
+ * Hard ceiling on drawn meshes.
+ *
+ * A backstop, not a design: with per-solid selection and shared geometry a real model sits
+ * far below it. It exists so that no model can ever lock the tab up again — and when it
+ * bites, the viewer says how much it is not showing rather than quietly drawing a partial
+ * structure that looks whole.
+ */
+const MAX_MESHES = 60000;
+
+/**
  * A content signature for the instance→unit map.
  *
  * The scene must rebuild when the mapping genuinely changes (a path was split into its
@@ -157,6 +167,7 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [progress, setProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
   const [missing, setMissing] = useState(0);
+  const [skipped, setSkipped] = useState(0);
 
   // Held in a ref so the click handler always sees the latest callback without the scene
   // being torn down and rebuilt whenever the parent re-renders.
@@ -177,6 +188,7 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
 
     setStatus("loading");
     setMissing(0);
+    setSkipped(0);
 
     let instances: Inst[] = [];
     try {
@@ -278,7 +290,10 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
     // regrouped in place instead of refetching 148 meshes — a rebuild costs ~33s, which
     // would make the depth control unusable.
     const drawn: { mesh: InstanceType<typeof THREE.Mesh>; instanceId: string }[] = [];
+    // One geometry per (prototype, body), shared by every instance that uses it.
+    const geomCache = new Map<string, InstanceType<typeof THREE.BufferGeometry>>();
     let unmeshed = 0;
+    let overBudget = 0;
 
     for (const inst of instances) {
       const bodies = geo.get(inst.prototype_key);
@@ -298,11 +313,35 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
         });
         materials.set(unit, mat);
       }
-      for (const b of bodies) {
-        const g = new THREE.BufferGeometry();
-        g.setAttribute("position", new THREE.Float32BufferAttribute(b.v, 3));
-        g.setIndex(b.f);
-        g.computeVertexNormals();
+      // An instance id ending ":sN" is ONE SOLID of an exploded assembly (the same
+      // convention as cas_member_instance's `{assembly_key}:s{seq}`). Every such instance
+      // shares the parent's prototype and its identity placement, so drawing all of the
+      // prototype's bodies for each of them draws the whole assembly once per solid, on
+      // top of itself.
+      //
+      // On job 10335 that is a prototype of 13,839 solids instanced 13,839 times:
+      // 191,517,921 meshes and 4.95 BILLION triangles. The tab does not error, it locks up
+      // and dies. Drawn correctly it is 13,839 meshes — one body each.
+      const solid = /:s(\d+)$/.exec(inst.instance_id);
+      const chosen = solid
+        ? (bodies[Number(solid[1])] ? [{ b: bodies[Number(solid[1])], i: Number(solid[1]) }] : [])
+        : bodies.map((b, i) => ({ b, i }));
+
+      for (const { b, i: bodyIndex } of chosen) {
+        if (drawn.length >= MAX_MESHES) { overBudget++; continue; }
+
+        // Geometry is shared per (prototype, body): 700 identical washers were uploading
+        // 700 copies of the same buffer to the GPU. Only the transform differs per
+        // instance, and applyMatrix4 on a Mesh sets its matrix, never the geometry.
+        const gk = `${inst.prototype_key}#${bodyIndex}`;
+        let g = geomCache.get(gk);
+        if (!g) {
+          g = new THREE.BufferGeometry();
+          g.setAttribute("position", new THREE.Float32BufferAttribute(b.v, 3));
+          g.setIndex(b.f);
+          g.computeVertexNormals();
+          geomCache.set(gk, g);
+        }
         const mesh = new THREE.Mesh(g, mat);
         if (inst.world_placement) {
           mesh.applyMatrix4(new THREE.Matrix4().fromArray(inst.world_placement));
@@ -318,6 +357,7 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
       }
     }
     setMissing(unmeshed);
+    setSkipped(overBudget);
 
     const whole = new THREE.Box3().setFromObject(root);
     const centre = whole.isEmpty()
@@ -408,10 +448,10 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
         ctrl.dispose();
         renderer.domElement.removeEventListener("pointerdown", onDown);
         renderer.domElement.removeEventListener("pointerup", onUp);
-        root.traverse((o) => {
-          const m = o as unknown as { geometry?: { dispose(): void } };
-          m.geometry?.dispose();
-        });
+        // Dispose the CACHE, not each mesh: geometry is shared, so a per-mesh dispose
+        // would free a buffer its siblings are still drawing from.
+        geomCache.forEach((g) => g.dispose());
+        geomCache.clear();
         materials.forEach((m) => m.dispose());
         renderer.dispose();
       },
@@ -609,9 +649,19 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
           </div>
 
           {/* A model drawn with pieces missing must never look complete. */}
-          {missing > 0 && (
-            <div className="absolute left-2 top-2 rounded bg-amber-500/90 px-2 py-1 text-xs font-medium text-amber-950">
-              {missing} part{missing === 1 ? "" : "s"} could not be drawn
+          {(missing > 0 || skipped > 0) && (
+            <div className="absolute left-2 top-2 space-y-1">
+              {missing > 0 && (
+                <div className="rounded bg-amber-500/90 px-2 py-1 text-xs font-medium text-amber-950">
+                  {missing} part{missing === 1 ? "" : "s"} could not be drawn
+                </div>
+              )}
+              {skipped > 0 && (
+                <div className="rounded bg-amber-600/90 px-2 py-1 text-xs font-medium text-white">
+                  Too large to draw in full — {skipped.toLocaleString()} more part
+                  {skipped === 1 ? "" : "s"} not shown
+                </div>
+              )}
             </div>
           )}
         </>
