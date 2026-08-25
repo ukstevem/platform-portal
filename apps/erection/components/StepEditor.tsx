@@ -73,9 +73,11 @@ export function StepEditor({ step, units, operations, onSave, onDelete, canExten
               Zoom to piece
             </button>
           )}
-          <button onClick={onDelete} className="text-xs text-slate-400 hover:text-red-600">
-            Delete step
-          </button>
+          <button
+            onClick={() => { if (confirm(`Delete step ${step.seq}? Its pieces go back to unsequenced.`)) onDelete(); }}
+            title="Remove this step from the sequence"
+            className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-600 hover:border-red-400 hover:bg-red-50 hover:text-red-700"
+          >Delete step</button>
         </div>
       </div>
 
@@ -183,13 +185,27 @@ export function StepEditor({ step, units, operations, onSave, onDelete, canExten
                   {onDepth && (
                     <span className="flex shrink-0 items-center gap-0.5">
                       <button
-                        onClick={(e) => { e.stopPropagation(); onDepth(u.unit_path, "inside"); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          // A piece with no sub-structure left comes apart completely. Say so
+                          // before it happens rather than after 13,839 loose solids appear.
+                          if (u.opens_to === "solids" && !confirm(
+                            `"${u.name}" has no sub-assemblies left — opening it separates all ` +
+                            `${u.part_count.toLocaleString("en-GB")} of its parts individually, ` +
+                            `so plates will no longer be attached to their beams. Continue?`)) return;
+                          onDepth(u.unit_path, "inside");
+                        }}
                         disabled={!u.splittable || !!depthBusy}
-                        title={u.splittable
-                          ? "Open this piece into what it is built from"
-                          : "Nothing deeper to open"}
-                        className="rounded border border-slate-300 px-1 py-0.5 text-[10px] leading-none text-slate-600 hover:bg-white disabled:opacity-25"
-                      >Open</button>
+                        title={!u.splittable
+                          ? "Nothing deeper to open"
+                          : u.opens_to === "solids"
+                            ? `No sub-assemblies left — this separates all ${u.part_count} parts individually`
+                            : "Open one level: into the sub-assemblies this is built from"}
+                        className={`rounded border px-1 py-0.5 text-[10px] leading-none disabled:opacity-25 ${
+                          u.opens_to === "solids"
+                            ? "border-amber-400 text-amber-800 hover:bg-amber-50"
+                            : "border-slate-300 text-slate-600 hover:bg-white"}`}
+                      >{u.opens_to === "solids" ? "Open all" : "Open"}</button>
                       <button
                         onClick={(e) => { e.stopPropagation(); onDepth(u.unit_path, "wider"); }}
                         disabled={!canWider || !!depthBusy}

@@ -816,13 +816,29 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
                           )}
                         </div>
                       </div>
-                      <div className="flex shrink-0 flex-col">
-                        <button onClick={(e) => { e.stopPropagation(); move(s.id, -1); }}
-                          disabled={i === 0}
-                          className="px-1 text-xs text-slate-400 hover:text-slate-800 disabled:opacity-25">▲</button>
-                        <button onClick={(e) => { e.stopPropagation(); move(s.id, 1); }}
-                          disabled={i === steps.length - 1}
-                          className="px-1 text-xs text-slate-400 hover:text-slate-800 disabled:opacity-25">▼</button>
+                      <div className="flex shrink-0 items-center gap-0.5">
+                        <div className="flex flex-col">
+                          <button onClick={(e) => { e.stopPropagation(); move(s.id, -1); }}
+                            disabled={i === 0}
+                            title="Move earlier"
+                            className="px-1 text-xs text-slate-400 hover:text-slate-800 disabled:opacity-25">▲</button>
+                          <button onClick={(e) => { e.stopPropagation(); move(s.id, 1); }}
+                            disabled={i === steps.length - 1}
+                            title="Move later"
+                            className="px-1 text-xs text-slate-400 hover:text-slate-800 disabled:opacity-25">▼</button>
+                        </div>
+                        {/* Delete belongs on the row too — hunting for it in the editor
+                            header is a step you should not have to take to drop a step. */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (confirm(`Delete step ${s.seq}? Its pieces go back to unsequenced.`)) {
+                              removeStep(s.id);
+                            }
+                          }}
+                          title={`Delete step ${s.seq}`}
+                          className="rounded px-1 text-sm leading-none text-slate-400 hover:bg-red-50 hover:text-red-600"
+                        >×</button>
                       </div>
                     </div>
                   </li>

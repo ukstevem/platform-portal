@@ -22,6 +22,12 @@ export type Unit = {
   assemblies: { assembly_key: string; name: string }[];
   marks: Mark[];
   splittable: boolean;
+  /**
+   * What Open gives you: "assemblies" steps down one tree level and the parts of each
+   * sub-assembly stay together; "solids" means the piece has no sub-structure left and
+   * comes apart completely — plates separated from the beams they belong to.
+   */
+  opens_to?: "assemblies" | "solids" | null;
   centroid: [number, number, number];
   origin_extent: [[number, number, number], [number, number, number]];
 };
