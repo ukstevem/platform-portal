@@ -51,6 +51,14 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
   // and declared before `pick` so the click handler can read it.
   const [selectedPieces, setSelectedPieces] = useState<Set<string>>(new Set());
   const [pick3d, setPick3d] = useState(false);
+  // Scope. On a plant model most of what loads is not the job — suppressing takes a piece
+  // out of the view, its memory, the palette, the sequence and every export.
+  const [suppressMode, setSuppressMode] = useState(false);
+  const [suppressed, setSuppressed] = useState<Unit[]>([]);
+  // Pieces ticked while choosing scope. Separate from the lift-authoring selection: these
+  // are two different jobs and sharing one set would make a stray click move steel.
+  const [scopeSelection, setScopeSelection] = useState<Set<string>>(new Set());
+  const [suppressedMass, setSuppressedMass] = useState(0);
 
   const steps: Step[] = useMemo(() => plan?.steps ?? [], [plan]);
   const stepListRef = useRef<HTMLUListElement>(null);
@@ -60,10 +68,14 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
   // ── load ───────────────────────────────────────────────────────────────────
 
   const loadUnits = useCallback(async () => {
-    const d = await call<{ units: Unit[]; instance_units: Record<string, string> }>(
-      api(modelId, "units/"));
+    const d = await call<{
+      units: Unit[]; instance_units: Record<string, string>;
+      suppressed?: Unit[]; suppressed_mass_kg?: number;
+    }>(api(modelId, "units/"));
     setUnits(d.units);
     setInstanceUnits(d.instance_units);
+    setSuppressed(d.suppressed ?? []);
+    setSuppressedMass(d.suppressed_mass_kg ?? 0);
   }, [modelId]);
 
   const loadPlan = useCallback(async () => {
@@ -103,6 +115,13 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
     // While a selection is being made, the REST of that step drops back too. Three picked
     // pieces in a hundred-piece lift are a handful of pixels against a wall of orange;
     // muting their neighbours is what makes them findable without zooming in.
+    // Choosing scope: the ticked pieces are the only thing that should read as chosen.
+    if (suppressMode) {
+      for (const path of scopeSelection) {
+        if (out[path]) out[path] = "picked";
+      }
+      return out;
+    }
     if (selectedPieces.size > 0) {
       const step = steps.find((s) => s.id === selectedStep);
       for (const it of step?.items ?? []) {
@@ -113,7 +132,7 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
       }
     }
     return out;
-  }, [units, steps, shownIndex, selectedPieces, selectedStep]);
+  }, [units, steps, shownIndex, selectedPieces, selectedStep, suppressMode, scopeSelection]);
 
   const totals = useMemo(() => {
     const sequenced = new Set(steps.flatMap((s) => s.items.map((i) => i.unit_path)));
@@ -135,16 +154,74 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
 
   // ── actions ────────────────────────────────────────────────────────────────
 
+  /**
+   * Put pieces out of scope, or bring them back.
+   *
+   * The server owns the whole change — palette, plan and scope in one transaction — and
+   * returns the new instance map, which is what makes the geometry leave the viewer's
+   * memory rather than merely being hidden.
+   */
+  const setScope = useCallback(async (unitPaths: string[], suppress: boolean,
+                                      isolate = false) => {
+    if (unitPaths.length === 0) return;
+    setBusy("scope");
+    try {
+      const d = await call<{
+        units: Unit[]; instance_units: Record<string, string>; plan: Plan;
+        suppressed: Unit[]; suppressed_mass_kg: number;
+        rebound: { steps_removed: number; items_removed: number };
+      }>(api(modelId, "suppress/"), {
+        method: "POST",
+        body: JSON.stringify({ unit_paths: unitPaths, suppress, isolate }),
+      });
+      setUnits(d.units);
+      setInstanceUnits(d.instance_units);
+      setPlan(d.plan);
+      setSuppressed(d.suppressed);
+      setSuppressedMass(d.suppressed_mass_kg);
+      if (d.rebound.steps_removed > 0) {
+        setNotice(
+          `${d.rebound.steps_removed} step(s) held only suppressed pieces and were removed.`);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not change the scope");
+    } finally {
+      setBusy(null);
+    }
+  }, [modelId]);
+
   const pick = useCallback(async (unitPath: string, opts?: { shift: boolean }) => {
     const u = unitByPath[unitPath];
     if (!u) return;
 
+    // Scope mode: a click takes the piece out of the job. Checked before everything else —
+    // while you are clearing a plant model down to the steel, that is the only thing a
+    // click should mean.
+    if (suppressMode) {
+      setScopeSelection((prev) => {
+        const next = new Set(prev);
+        if (next.has(unitPath)) next.delete(unitPath);
+        else next.add(unitPath);
+        return next;
+      });
+      return;
+    }
+
     // Picking a lift out of an opened assembly: a click ticks the piece rather than doing
     // anything to the plan. Only pieces of the step being edited can be ticked — clicking
     // elsewhere in the structure would otherwise silently build a selection you cannot see.
-    if (pick3d && selectedStep) {
+    if (pick3d) {
       const step = steps.find((s) => s.id === selectedStep);
-      if (step?.items.some((i) => i.unit_path === unitPath)) {
+      if (!step) {
+        setNotice("Select a step first — picking adds pieces to the step you are editing.");
+        return;
+      }
+      if (!step.items.some((i) => i.unit_path === unitPath)) {
+        // Silence here reads as a broken click. Say why nothing happened.
+        setNotice(`That piece is not in step ${step.seq}, so it cannot be moved out of it.`);
+        return;
+      }
+      {
         setSelectedPieces((prev) => {
           const next = new Set(prev);
           if (next.has(unitPath)) next.delete(unitPath);
@@ -216,7 +293,7 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not add the step");
     } finally { setBusy(null); }
-  }, [mode, steps, unitByPath, modelId, selectedStep, pick3d]);
+  }, [mode, steps, unitByPath, modelId, selectedStep, pick3d, suppressMode, setScope]);
 
   const [depthBusy, setDepthBusy] = useState<string | null>(null);
   // Drag-and-drop reordering.
@@ -356,25 +433,18 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
     }));
   }, [modelId]);
 
-  const autoSequence = useCallback(async () => {
-    if (steps.length && !confirm(
-      `This replaces the ${steps.length} step(s) already recorded. Continue?`)) return;
-    setBusy("auto");
-    try {
-      const d = await call<{ plan: Plan }>(api(modelId, "auto-sequence/"), { method: "POST" });
-      setPlan(d.plan);
-      setMode("review");
-      setCursor(0);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not build a draft");
-    } finally { setBusy(null); }
-  }, [modelId, steps.length]);
-
+  /**
+   * Clear the SEQUENCE, keeping the scope and the opened pieces.
+   *
+   * Those are not part of the sequence — they are the decisions about which model you are
+   * sequencing, and on a plant model they take real work. Clearing used to delete the plan
+   * row, which took them with it: you cleared your steps and lost your scope too.
+   */
   const clearPlan = useCallback(async () => {
-    if (!confirm("Delete the whole sequence and start again?")) return;
+    if (!confirm("Clear the sequence? Your scope and opened pieces are kept.")) return;
     setBusy("clearing");
     try {
-      await fetch(api(modelId, "plan/"), { method: "DELETE" });
+      await fetch(api(modelId, "steps/"), { method: "DELETE" });
       await loadPlan();
       setCursor(0);
       setSelectedStep(null);
@@ -513,20 +583,57 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
           ))}
         </div>
 
+        <button
+          onClick={() => { setSuppressMode((v) => !v); setPick3d(false); setScopeSelection(new Set()); }}
+          title="Narrow the model to your job — keep what you want, or drop what you don't"
+          className={`rounded-md border px-3 py-1.5 text-sm transition ${
+            suppressMode
+              ? "border-amber-500 bg-amber-500 text-white"
+              : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"}`}
+        >
+          {suppressMode ? "Choosing scope…" : "Set scope"}
+        </button>
+
+        {suppressMode && (
+          <span className="flex items-center gap-1.5">
+            <span className="text-xs text-slate-600">
+              {scopeSelection.size > 0
+                ? `${scopeSelection.size} selected`
+                : "Click pieces in the 3D view"}
+            </span>
+            <button
+              onClick={() => { setScope([...scopeSelection], true); setScopeSelection(new Set()); }}
+              disabled={scopeSelection.size === 0 || !!busy}
+              title="Put the selected pieces out of the job"
+              className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-30"
+            >Suppress{scopeSelection.size > 0 ? ` (${scopeSelection.size})` : ""}</button>
+            <button
+              onClick={() => { setScope([...scopeSelection], true, true); setScopeSelection(new Set()); }}
+              disabled={scopeSelection.size === 0 || !!busy}
+              title="Keep only the selected pieces — everything else goes out of the job"
+              className="rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-30"
+            >Isolate{scopeSelection.size > 0 ? ` (keep ${scopeSelection.size})` : ""}</button>
+            <button
+              onClick={() => setScopeSelection(new Set())}
+              disabled={scopeSelection.size === 0}
+              className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-30"
+            >Clear</button>
+          </span>
+        )}
+
         <span className="text-xs text-slate-500">
-          {mode === "record"
+          {suppressMode
+            ? "Click pieces in the 3D view. Isolate keeps only those; Suppress drops them."
+            : mode === "record"
             ? "Click pieces in the 3D view in the order they go up. Click again to take one back out; shift-click to add it to the selected step as one lift."
             : "Scrub the sequence. ← → to step. Drag a step to reorder it."}
         </span>
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <button onClick={autoSequence} disabled={!!busy}
-            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-            {busy === "auto" ? "Drafting…" : "Draft from model"}
-          </button>
           <button onClick={clearPlan} disabled={!!busy || steps.length === 0}
+            title="Delete the steps. Scope and opened pieces are kept."
             className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-            Clear
+            Clear sequence
           </button>
           <span className="mx-1 h-5 w-px bg-slate-300" />
           <button onClick={() => download("sequence.csv/")} disabled={steps.length === 0}
@@ -636,8 +743,8 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
 
             {steps.length === 0 && (
               <p className="p-4 text-sm text-slate-500">
-                Nothing sequenced yet. Click a piece in the 3D view, or use
-                <b> Draft from model</b> to lay every piece out lowest-first and rearrange from there.
+                Nothing sequenced yet. Click pieces in the 3D view in the order they go up.
+                Use <b>Set scope</b> first if the model carries more than this job.
               </p>
             )}
 
@@ -724,6 +831,40 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
             </ul>
           </div>
 
+          {/* What has been put aside. Scope you cannot see is scope that gets forgotten — and
+              the tonnage is shown so a 561 t omission is never silent (bd tjf). */}
+          {suppressed.length > 0 && (
+            <div className="shrink-0 rounded-lg border border-amber-300 bg-amber-50">
+              <div className="flex items-center justify-between border-b border-amber-200 px-3 py-1.5">
+                <span className="text-xs font-semibold uppercase tracking-wide text-amber-900">
+                  Out of scope ({suppressed.length}) · {Math.round(suppressedMass).toLocaleString("en-GB")} kg
+                </span>
+                <button
+                  onClick={() => setScope(suppressed.map((u) => u.unit_path), false)}
+                  disabled={!!busy}
+                  className="text-xs text-amber-800 hover:text-amber-950 disabled:opacity-40"
+                >Restore all</button>
+              </div>
+              <ul className="max-h-32 space-y-0.5 overflow-auto px-3 py-1.5">
+                {suppressed.map((u) => (
+                  <li key={u.unit_path} className="flex items-center gap-2 text-xs">
+                    <span className="min-w-0 flex-1 truncate text-amber-900" title={u.unit_path}>
+                      {u.name}
+                    </span>
+                    <span className="shrink-0 tabular-nums text-amber-700">
+                      {u.part_count}p · {Math.round(u.mass_kg).toLocaleString("en-GB")} kg
+                    </span>
+                    <button
+                      onClick={() => setScope([u.unit_path], false)}
+                      disabled={!!busy}
+                      className="shrink-0 rounded border border-amber-400 px-1.5 py-0.5 text-[10px] leading-none text-amber-900 hover:bg-white disabled:opacity-40"
+                    >Restore</button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {editing ? (
             <StepEditor
               key={editing.id}
@@ -740,7 +881,12 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
               selected={selectedPieces}
               setSelected={setSelectedPieces}
               pick3d={pick3d}
-              setPick3d={setPick3d}
+              setPick3d={(on) => {
+                // Two modes both wanting the same click is how "select in 3D then move"
+                // silently did nothing: Set scope was still on and took every click first.
+                setPick3d(on);
+                if (on) setSuppressMode(false);
+              }}
             />
           ) : (
             <div className="shrink-0 rounded-lg border border-dashed border-slate-300 bg-white px-3 py-4 text-center text-sm text-slate-400">

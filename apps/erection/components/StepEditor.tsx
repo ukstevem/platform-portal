@@ -45,6 +45,13 @@ export function StepEditor({ step, units, operations, onSave, onDelete, canExten
     if (draft[k] !== step[k]) onSave({ [k]: draft[k] } as Partial<Step>);
   };
 
+  // Rendering every row of a huge lift makes each tick re-render thousands of nodes, and a
+  // 13,839-row list is not how anyone picks a lift anyway — that is what Pick in 3D is for.
+  // The cap is on what is DRAWN; All/None and every action still act on the whole lift.
+  const ROWS_SHOWN = 300;
+  const shown = units.slice(0, ROWS_SHOWN);
+  const hidden = units.length - shown.length;
+
   const mass = units.reduce((a, u) => a + u.mass_kg, 0);
   const incomplete = units.some((u) => !u.mass_complete);
   const heaviest = units.reduce((a, u) => Math.max(a, u.mass_kg), 0);
@@ -106,7 +113,7 @@ export function StepEditor({ step, units, operations, onSave, onDelete, canExten
                 {/* Reading 102 names to find "stair flight 1" is not how anyone picks a
                     lift. Clicking the steel is. */}
                 <button
-                  onClick={() => setPick3d(!pick3d)}
+                  onClick={() => setPick3d(!pick3d)}   /* also turns Set scope off — see planner */
                   title="Click pieces in the 3D view to tick them"
                   className={`rounded border px-1.5 py-0.5 text-[11px] ${
                     pick3d
@@ -134,7 +141,7 @@ export function StepEditor({ step, units, operations, onSave, onDelete, canExten
 
           {/* Own scroll: a piece opened to a hundred parts must not set the panel height. */}
           <ul className="mt-1 max-h-56 space-y-0.5 overflow-auto pr-1">
-            {units.map((u) => {
+            {shown.map((u) => {
               // Nothing may go wider than the default depth: one level above it is the
               // model root, so the whole job would become a single lift.
               const canWider = u.unit_path.split("/").length > DEFAULT_DEPTH;
@@ -200,6 +207,12 @@ export function StepEditor({ step, units, operations, onSave, onDelete, canExten
             {units.length === 0 && (
               <li className="text-xs text-amber-700">
                 No pieces resolve for this step — they may have been removed from the model.
+              </li>
+            )}
+            {hidden > 0 && (
+              <li className="pt-1 text-[11px] text-slate-500">
+                +{hidden.toLocaleString("en-GB")} more not listed — use <b>Pick in 3D</b> to
+                choose them, or <b>All</b> to take the whole lift.
               </li>
             )}
           </ul>

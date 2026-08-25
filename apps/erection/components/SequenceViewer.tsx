@@ -34,8 +34,12 @@ export type ViewerHandle = {
    */
   capture: (opts?: { print?: boolean }) => string | null;
   setView: (v: "iso" | "front" | "side" | "top") => void;
-  /** Regroup the drawn meshes after a depth change, without refetching geometry. */
-  remap: (instanceUnits: Record<string, string>, states: Record<string, UnitState>) => void;
+  /**
+   * Regroup the drawn meshes without refetching geometry. Returns false when the new map
+   * contains instances that are not drawn (a restore) — those need a full rebuild, because
+   * their buffers were disposed when they were suppressed.
+   */
+  remap: (instanceUnits: Record<string, string>, states: Record<string, UnitState>) => boolean;
   /** Frame the camera on one piece, so a step's subject is actually visible. */
   focus: (unitPaths: string[]) => void;
   reset: () => void;
@@ -145,7 +149,7 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
   const scene = useRef<{
     dispose: () => void;
     recolour: (s: Record<string, UnitState>) => void;
-    remap: (m: Record<string, string>, states: Record<string, UnitState>) => void;
+    remap: (m: Record<string, string>, states: Record<string, UnitState>) => boolean;
     capture: (opts?: { print?: boolean }) => string | null;
     setView: (v: string) => void;
     focus: (paths: string[]) => void;
@@ -177,7 +181,7 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
   useImperativeHandle(ref, () => ({
     capture: (opts) => scene.current?.capture(opts) ?? null,
     setView: (v) => scene.current?.setView(v),
-    remap: (m, states) => scene.current?.remap(m, states),
+    remap: (m, states) => scene.current?.remap(m, states) ?? false,
     focus: (paths) => scene.current?.focus(paths),
     reset: () => scene.current?.reset(),
   }), []);
@@ -359,14 +363,21 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
     setMissing(unmeshed);
     setSkipped(overBudget);
 
-    const whole = new THREE.Box3().setFromObject(root);
-    const centre = whole.isEmpty()
-      ? new THREE.Vector3() : whole.getCenter(new THREE.Vector3());
-    const size = whole.isEmpty()
-      ? new THREE.Vector3(1, 1, 1) : whole.getSize(new THREE.Vector3());
-    const radius = Math.max(size.x, size.y, size.z) || 1;
-    cam.near = radius / 2000;
-    cam.far = radius * 200;
+    // Mutable: suppressing most of a plant changes the extent of the scene, so the centre
+    // and radius the camera works from have to be recomputed rather than fixed at build.
+    let centre = new THREE.Vector3();
+    let radius = 1;
+    const measure = () => {
+      const whole = new THREE.Box3().setFromObject(root);
+      centre = whole.isEmpty() ? new THREE.Vector3() : whole.getCenter(new THREE.Vector3());
+      const size = whole.isEmpty()
+        ? new THREE.Vector3(1, 1, 1) : whole.getSize(new THREE.Vector3());
+      radius = Math.max(size.x, size.y, size.z) || 1;
+      cam.near = radius / 2000;
+      cam.far = radius * 200;
+      cam.updateProjectionMatrix();
+    };
+    measure();
 
     const frame = (target: InstanceType<typeof THREE.Vector3>, r: number, v = "iso") => {
       const d = Math.max(r, radius * 0.05) * 2.1;
@@ -383,6 +394,9 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
       ctrl.update();
     };
     let lastView = "iso";
+    // Re-measure and re-frame. Called after a remap removes meshes, so the camera is fitted
+    // to what is actually there rather than to the extent of things that have gone.
+    const refit = () => { measure(); frame(centre, radius, lastView); };
     frame(centre, radius, "iso");
 
     // Picking. A drag that ends on a mesh is a camera move, not a selection, so only a
@@ -456,13 +470,32 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
         renderer.dispose();
       },
       remap: (map, states) => {
-        // Reassign every mesh to its new unit's material. Geometry, placements and the
-        // camera are untouched — only the grouping changed.
+        // A restore puts instances back that were suppressed, and their geometry was
+        // disposed at that point — there is nothing to reassign. Say so and let the caller
+        // rebuild rather than silently drawing a scene that is missing what was restored.
+        const present = new Set(drawn.map((e) => e.instanceId));
+        for (const id of Object.keys(map)) {
+          if (!present.has(id)) return false;
+        }
+
+        // Regroup in place: reassign each mesh to its new unit's material, and REMOVE any
+        // instance the map no longer contains.
+        //
+        // That second part is how suppression frees memory. A suppressed piece is simply
+        // absent from instance_units, so its meshes come out of the scene and its buffers
+        // are released — not hidden. On job 10335, keeping only the steel structure takes
+        // the scene from 17,051 drawn instances to 10.
         const fresh = new Map<string, InstanceType<typeof THREE.MeshLambertMaterial>>();
+        const kept: typeof drawn = [];
         unitBoxes.clear();
-        for (const { mesh, instanceId } of drawn) {
+
+        for (const entry of drawn) {
+          const { mesh, instanceId } = entry;
           const unit = map[instanceId];
-          if (!unit) continue;
+          if (!unit) {
+            root.remove(mesh);
+            continue;                       // geometry disposed below, once unreferenced
+          }
           let mat = fresh.get(unit);
           if (!mat) {
             // Reuse the existing material where the unit survived the change, so its
@@ -474,19 +507,39 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
           }
           mesh.material = mat;
           mesh.userData.unit = unit;
+          kept.push(entry);
           const box = new THREE.Box3().setFromObject(mesh);
           const existing = unitBoxes.get(unit);
           if (existing) existing.union(box);
           else unitBoxes.set(unit, box.clone());
         }
-        // Dispose materials for units that no longer exist, or a long session of depth
-        // changes leaks one GPU material per abandoned piece.
+
+        // Geometry is shared per (prototype, body), so a buffer may only be freed once
+        // nothing still draws from it — disposing per removed mesh would blank its siblings.
+        const stillUsed = new Set<InstanceType<typeof THREE.BufferGeometry>>(
+          kept.map((e) => e.mesh.geometry as InstanceType<typeof THREE.BufferGeometry>));
+        for (const [key, g] of geomCache) {
+          if (!stillUsed.has(g)) { g.dispose(); geomCache.delete(key); }
+        }
+
+        // Dispose materials for units that no longer exist, or a long session of depth and
+        // scope changes leaks one GPU material per abandoned piece.
         for (const [unit, mat] of materials) {
           if (!fresh.has(unit)) mat.dispose();
         }
         materials.clear();
         for (const [unit, mat] of fresh) materials.set(unit, mat);
+
+        drawn.length = 0;
+        drawn.push(...kept);
+        setMissing(0);
+        setSkipped(0);
+
+        // Re-frame: after suppressing most of a plant the camera would otherwise still be
+        // fitted to the extent of things that are no longer there.
+        refit();
         scene.current?.recolour(states);
+        return true;
       },
       recolour: (states) => {
         lastStates = states;
@@ -571,7 +624,7 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
         const s = box.getSize(new THREE.Vector3());
         frame(c, Math.max(s.x, s.y, s.z) || radius * 0.1, lastView);
       },
-      reset: () => frame(centre, radius, lastView),
+      reset: () => refit(),
     };
 
     scene.current.recolour(stateByUnit);
@@ -601,7 +654,10 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
     if (builtSig.current === null) { builtSig.current = unitsSig; return; }
     if (builtSig.current === unitsSig) return;
     builtSig.current = unitsSig;
-    scene.current?.remap(instanceUnits, stateByUnit);
+    // remap handles regrouping and suppression in place. It returns false only when the map
+    // has grown — a restore — because those buffers were disposed and cannot be reassigned.
+    const handled = scene.current?.remap(instanceUnits, stateByUnit);
+    if (handled === false) build();
     // stateByUnit is read for the repaint that follows the regroup; it must not re-trigger
     // this effect, which is keyed on the mapping alone.
     // eslint-disable-next-line react-hooks/exhaustive-deps
