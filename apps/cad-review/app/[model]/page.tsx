@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ReviewQueue } from "@/components/ReviewQueue";
+import { ModelTabs } from "@/components/ModelTabs";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +38,7 @@ export default async function ModelReviewPage({
         </h1>
       </div>
 
-      <ReviewQueue modelId={model} />
+      <ModelTabs modelId={model} />
     </main>
   );
 }

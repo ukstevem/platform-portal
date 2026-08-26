@@ -28,11 +28,16 @@ async function forward(req: NextRequest, path: string[]) {
   }
   try {
     const res = await fetch(url, init);
-    const text = await res.text();
-    return new NextResponse(text, {
-      status: res.status,
-      headers: { "Content-Type": res.headers.get("content-type") ?? "application/json" },
-    });
+    const body = await res.arrayBuffer();
+    const headers: Record<string, string> = {
+      "Content-Type": res.headers.get("content-type") ?? "application/json",
+    };
+    // Carry the download filename through. Without it the browser saves every cut file as
+    // the route name - "nc1" - and a folder of identically-named downloads is useless to
+    // whoever takes them to a machine.
+    const cd = res.headers.get("content-disposition");
+    if (cd) headers["Content-Disposition"] = cd;
+    return new NextResponse(body, { status: res.status, headers });
   } catch (err) {
     console.error("cad-review proxy failed:", url, err);
     return NextResponse.json(

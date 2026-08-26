@@ -32,10 +32,12 @@ type Queue = {
   held_flat_pattern: number;
   saw_cut_no_nc1: number;
   clear: boolean;
+  produce_stale: boolean;
   actions: Record<Kind, string>;
 };
 
-type Kind = "needs_type" | "needs_size" | "cannot_cut" | "confirmed" | "excluded";
+type Kind = "needs_type" | "needs_size" | "cannot_cut" | "confirmed" | "excluded"
+          | "held";
 
 const KIND_LABEL: Record<Kind, string> = {
   needs_type: "Needs a type",
@@ -43,6 +45,7 @@ const KIND_LABEL: Record<Kind, string> = {
   cannot_cut: "No cut file",
   confirmed: "Confirmed",
   excluded: "Excluded",
+  held: "Held — flat pattern",
 };
 
 const KIND_BLURB: Record<Kind, string> = {
@@ -51,6 +54,9 @@ const KIND_BLURB: Record<Kind, string> = {
   cannot_cut: "Sized, but the resolver could not produce an NC1. Confirm to accept it.",
   confirmed: "Settled by a person. Re-open if it was a misclick.",
   excluded: "Not supplied. Visible on purpose — excluding must not be a one-way door.",
+  held: "Needs an unfolded flat pattern before it can be cut — or the classifier read it "
+      + "wrong. A skewed cut on a section reads as a formed plate; if that is what this is, "
+      + "set the right type and size here.",
 };
 
 const TYPES = ["SECTION", "PLATE", "TUBE", "PIPE", "RAIL", "FORMED_PLATE",
@@ -146,6 +152,12 @@ export function ReviewQueue({ modelId }: { modelId: string }) {
 
   return (
     <div className="space-y-4">
+      {q.produce_stale && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+          Re-producing — these counts are mid-flight. A re-identify clears sizes and only
+          produce writes them back, so anything below may still be catching up.
+        </div>
+      )}
       <Summary q={q} />
 
       <div className="flex gap-2 flex-wrap">
@@ -215,7 +227,7 @@ export function ReviewQueue({ modelId }: { modelId: string }) {
 
                 <div className="flex items-center gap-2 flex-wrap"
                      onClick={(e) => e.stopPropagation()}>
-                  {open === "needs_size" && (
+                  {(open === "needs_size" || open === "held") && (
                     <>
                       <input
                         value={sizes[it.fingerprint_key] ?? ""}
@@ -266,7 +278,7 @@ export function ReviewQueue({ modelId }: { modelId: string }) {
                     </>
                   )}
 
-                  {open === "needs_type" && (
+                  {(open === "needs_type" || open === "held") && (
                     <select
                       defaultValue=""
                       disabled={busy === it.fingerprint_key}
@@ -328,7 +340,11 @@ export function ReviewQueue({ modelId }: { modelId: string }) {
           ))}
         </ul>
 
-        <div className="order-first md:order-none md:sticky md:top-4 h-[26rem] md:h-[32rem]">
+        {/* self-start is what makes sticky work: a stretched grid item fills its row and
+            has nothing to slide within. */}
+        <div className="order-first md:order-none md:self-start md:sticky md:top-4
+                        h-[26rem] md:h-[calc(100vh-8rem)] md:max-h-[40rem]
+                        md:overflow-y-auto">
           <PartViewer modelId={modelId} fingerprintKey={sel} />
         </div>
       </div>
