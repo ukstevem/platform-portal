@@ -80,3 +80,43 @@ export const OPERATIONS = [
   "remove-temp",
   "inspect",
 ] as const;
+
+/**
+ * Which pieces are welded to each other — the fact the model tree cannot carry.
+ *
+ * A lift is a place in the model tree, and that holds only while the tree agrees with what is
+ * physically joined. Detected from geometry (world-space weld graph), so it is best-effort and
+ * ADVISORY: it is shown beside the palette and never re-shapes it. `detected: false` means
+ * detection has not been run — which is not the same as "nothing is welded".
+ */
+export type WeldGroup = {
+  name: string;
+  member_count: number;
+  mass_kg: number;
+  mass_complete: boolean;
+  weld_length_mm: number;
+  unit_paths: string[];
+  spans_units: boolean;
+  /** Bought-out or existing plant: delivered assembled, and never welded to our steel. */
+  not_fabricated: boolean;
+};
+
+export type WeldConflict = {
+  group_no: number;
+  name: string;
+  unit_paths: string[];
+  member_count: number;
+  mass_kg: number;
+  note: string;
+};
+
+export type WeldView = {
+  detected: boolean;
+  /** Welded pieces that straddle two or more lifts — those lifts cannot go up separately. */
+  conflicts: WeldConflict[];
+  /** unit_path → the welded pieces its parts belong to. */
+  unit_groups: Record<string, number[]>;
+  /** The inverse error: a "lift" whose parts sit in several welded assemblies. */
+  split_units: Record<string, number[]>;
+  groups: Record<string, WeldGroup>;
+};

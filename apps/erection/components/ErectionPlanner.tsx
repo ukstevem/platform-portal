@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SequenceViewer, type UnitState, type ViewerHandle } from "./SequenceViewer";
 import { StepEditor } from "./StepEditor";
-import { OPERATIONS, type Step, type Unit, type Plan } from "./types";
+import { OPERATIONS, type Step, type Unit, type Plan, type WeldView } from "./types";
 
 /**
  * The planner: pick pieces in the order they go up, then read the sequence back.
@@ -59,6 +59,10 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
   // are two different jobs and sharing one set would make a stray click move steel.
   const [scopeSelection, setScopeSelection] = useState<Set<string>>(new Set());
   const [suppressedMass, setSuppressedMass] = useState(0);
+  // Which pieces are welded to each other. Advisory — shown beside the palette, never applied
+  // to it: the geometry is best-effort and the planner may have a reason we cannot see.
+  const [weld, setWeld] = useState<WeldView | null>(null);
+  const [showWeld, setShowWeld] = useState(true);
 
   const steps: Step[] = useMemo(() => plan?.steps ?? [], [plan]);
   const stepListRef = useRef<HTMLUListElement>(null);
@@ -70,12 +74,13 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
   const loadUnits = useCallback(async () => {
     const d = await call<{
       units: Unit[]; instance_units: Record<string, string>;
-      suppressed?: Unit[]; suppressed_mass_kg?: number;
+      suppressed?: Unit[]; suppressed_mass_kg?: number; weld?: WeldView;
     }>(api(modelId, "units/"));
     setUnits(d.units);
     setInstanceUnits(d.instance_units);
     setSuppressed(d.suppressed ?? []);
     setSuppressedMass(d.suppressed_mass_kg ?? 0);
+    setWeld(d.weld ?? null);
   }, [modelId]);
 
   const loadPlan = useCallback(async () => {
@@ -95,6 +100,53 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
       }
     })();
   }, [loadUnits, loadPlan]);
+
+  /**
+   * unit_path → the other lifts it is welded to. Built from the groups rather than the
+   * conflicts, so a piece knows its partners even when the planner has not opened the panel.
+   */
+  const weldPartners = useMemo(() => {
+    const out: Record<string, Set<string>> = {};
+    for (const g of Object.values(weld?.groups ?? {})) {
+      if (!g.spans_units) continue;
+      for (const a of g.unit_paths) {
+        const set = (out[a] ??= new Set());
+        for (const b of g.unit_paths) if (b !== a) set.add(b);
+      }
+    }
+    return out;
+  }, [weld]);
+
+  /** unit_path → the step holding it, so a warning can name the step, not just the piece. */
+  const stepOfUnit = useMemo(() => {
+    const out: Record<string, Step> = {};
+    for (const s of steps) for (const it of s.items) out[it.unit_path] = s;
+    return out;
+  }, [steps]);
+
+  /**
+   * Pieces in this step that are welded to a piece sequenced elsewhere (or not sequenced at
+   * all). This is the warning that matters: it appears on the step you are looking at, at the
+   * moment the plan is actually wrong, rather than in a report nobody opens.
+   */
+  const weldSplitByStep = useMemo(() => {
+    const out: Record<string, { partners: Set<string>; steps: Set<number> }> = {};
+    for (const s of steps) {
+      const mine = new Set(s.items.map((i) => i.unit_path));
+      const partners = new Set<string>();
+      const otherSteps = new Set<number>();
+      for (const it of s.items) {
+        for (const p of weldPartners[it.unit_path] ?? []) {
+          if (mine.has(p)) continue;
+          partners.add(p);
+          const owner = stepOfUnit[p];
+          if (owner) otherSteps.add(owner.seq);
+        }
+      }
+      if (partners.size) out[s.id] = { partners, steps: otherSteps };
+    }
+    return out;
+  }, [steps, weldPartners, stepOfUnit]);
 
   // ── derived view state ─────────────────────────────────────────────────────
 
@@ -814,6 +866,21 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
                               · {gone} piece(s) missing from model
                             </span>
                           )}
+                          {weldSplitByStep[s.id] && (
+                            <span
+                              className="font-semibold text-rose-700"
+                              title={
+                                "Welded to " +
+                                [...weldSplitByStep[s.id].partners]
+                                  .map((p) => unitByPath[p]?.name ?? p).join(", ") +
+                                ". These arrive as one piece — they cannot be erected separately."
+                              }
+                            >
+                              · welded to {weldSplitByStep[s.id].steps.size > 0
+                                ? "step " + [...weldSplitByStep[s.id].steps].sort((a, b) => a - b).join(", ")
+                                : "an unsequenced piece"}
+                            </span>
+                          )}
                         </div>
                       </div>
                       <div className="flex shrink-0 items-center gap-0.5">
@@ -846,6 +913,50 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
               })}
             </ul>
           </div>
+
+          {/* Welded together. The model tree says these are separate lifts; the geometry says they
+              arrive as one piece. Advisory — detection is best-effort and the planner may have a
+              reason (a modelled gap, a bolted joint read as contact) — so this reports and never
+              re-shapes the palette. Clicking focuses the piece in the view, because a weld group
+              is unfindable in a 7-metre frame otherwise. */}
+          {weld?.detected && weld.conflicts.length > 0 && (
+            <div className="shrink-0 rounded-lg border border-rose-300 bg-rose-50">
+              <button
+                onClick={() => setShowWeld((v) => !v)}
+                className="flex w-full items-center justify-between px-3 py-1.5 text-left"
+              >
+                <span className="text-xs font-semibold uppercase tracking-wide text-rose-900">
+                  Welded together ({weld.conflicts.length})
+                </span>
+                <span className="text-xs text-rose-700">{showWeld ? "hide" : "show"}</span>
+              </button>
+              {showWeld && (
+                <>
+                  <p className="px-3 pb-1 text-xs text-rose-800">
+                    Each of these is one welded piece spread across several lifts. Detected from
+                    geometry — check before acting.
+                  </p>
+                  <ul className="max-h-40 divide-y divide-rose-100 overflow-auto">
+                    {weld.conflicts.map((c) => (
+                      <li key={c.group_no}>
+                        <button
+                          onClick={() => viewer.current?.focus(c.unit_paths)}
+                          className="block w-full px-3 py-1.5 text-left hover:bg-rose-100/60"
+                        >
+                          <div className="truncate text-xs text-rose-900">
+                            {c.unit_paths.map((p) => unitByPath[p]?.name ?? p).join("  +  ")}
+                          </div>
+                          <div className="text-[11px] text-rose-700">
+                            {c.unit_paths.length} lifts · {c.member_count} parts · {kg(c.mass_kg)}
+                          </div>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
+          )}
 
           {/* What has been put aside. Scope you cannot see is scope that gets forgotten — and
               the tonnage is shown so a 561 t omission is never silent (bd tjf). */}
