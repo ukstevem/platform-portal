@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { PartViewer } from "./PartViewer";
 
 /**
@@ -67,6 +67,9 @@ export function ReviewQueue({ modelId }: { modelId: string }) {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [open, setOpen] = useState<Kind>("needs_type");
+  // Whether the operator has picked a tab themselves. Until they do, the queue opens where
+  // the work IS — see pickInitial below.
+  const chosen = useRef(false);
   const [sizes, setSizes] = useState<Record<string, string>>({});
   // Selecting a part loads ONE mesh. Rendering all sixteen at once would mean
   // sixteen meshes and, for this job, ~300 bodies before the reviewer looks at
@@ -81,7 +84,18 @@ export function ReviewQueue({ modelId }: { modelId: string }) {
       const res = await fetch(`/cad-review/api/cad/models/${modelId}/review/queue/`,
                               { cache: "no-store" });
       if (!res.ok) { setErr(`Queue returned ${res.status}`); return; }
-      setQ(await res.json()); setErr(null);
+      const queue: Queue = await res.json();
+      setQ(queue); setErr(null);
+      // OPEN WHERE THE WORK IS. The queue used to open on needs_type whatever it held, so a
+      // model whose only outstanding item was HELD showed "Nothing here." and read as a queue
+      // with no way to act — which is exactly how Steve found X00001: a formed plate that is
+      // not one, sitting in a tab he had no reason to click. Actionable kinds first, in the
+      // order a reviewer would work them; confirmed/excluded are records, not work.
+      if (!chosen.current) {
+        const firstWithWork = (["needs_type", "needs_size", "cannot_cut", "held"] as Kind[])
+          .find((k) => (queue.counts?.[k] ?? 0) > 0);
+        if (firstWithWork) setOpen(firstWithWork);
+      }
     } catch {
       setErr("Could not reach the CAD service");
     }
@@ -164,7 +178,7 @@ export function ReviewQueue({ modelId }: { modelId: string }) {
         {(Object.keys(KIND_LABEL) as Kind[]).map((k) => (
           <button
             key={k}
-            onClick={() => { setOpen(k); setSel(null); }}
+            onClick={() => { chosen.current = true; setOpen(k); setSel(null); }}
             className={`rounded-full px-3 py-1.5 text-sm border transition ${
               open === k
                 ? "bg-slate-900 text-white border-slate-900"
