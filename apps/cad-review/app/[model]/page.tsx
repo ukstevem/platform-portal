@@ -38,7 +38,7 @@ export default async function ModelReviewPage({
         </h1>
       </div>
 
-      <ModelTabs modelId={model} />
+      <ModelTabs modelId={model} projectRef={m?.project_ref ?? null} />
     </main>
   );
 }

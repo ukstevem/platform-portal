@@ -5,14 +5,18 @@ import { ReviewQueue } from "./ReviewQueue";
 import { PartsList } from "./PartsList";
 import { ScopeCandidates } from "./ScopeCandidates";
 import { ScopeTree } from "./ScopeTree";
+import { StockNesting } from "./StockNesting";
 
 /**
  * Two questions, two views. "What still needs me?" (review) and "what did we make, and give
  * me the file" (parts). They are different jobs — one is adjudication, the other is
  * collecting output — so mixing them into one table would serve neither.
  */
-export function ModelTabs({ modelId }: { modelId: string }) {
-  const [tab, setTab] = useState<"tree" | "scope" | "review" | "parts">("tree");
+export function ModelTabs({ modelId, projectRef }: {
+  modelId: string; projectRef?: string | null;
+}) {
+  const [tab, setTab] = useState<
+    "tree" | "scope" | "review" | "parts" | "nest">("tree");
   // Bump to force the sibling views to refetch after a scope decision changes
   // what is billable underneath them.
   const [gen, setGen] = useState(0);
@@ -21,7 +25,8 @@ export function ModelTabs({ modelId }: { modelId: string }) {
     <div className="space-y-4">
       <div className="flex gap-1 border-b border-slate-200">
         {([["tree", "Scope the model"], ["scope", "Possible bought-outs"],
-          ["review", "Review"], ["parts", "Parts & cut files"]] as const).map(([k, label]) => (
+          ["review", "Review"], ["parts", "Parts & cut files"],
+          ["nest", "Stock & nesting"]] as const).map(([k, label]) => (
           <button
             key={k}
             onClick={() => setTab(k)}
@@ -46,6 +51,11 @@ export function ModelTabs({ modelId }: { modelId: string }) {
                          onChanged={() => setGen(gen + 1)} />)}
       {tab === "review" && <ReviewQueue key={`r${gen}`} modelId={modelId} />}
       {tab === "parts" && <PartsList key={`p${gen}`} modelId={modelId} />}
+      {/* Last in the strip because it is last in the job: nothing should be nested until the
+          scope is settled and the lengths are verified. */}
+      {tab === "nest" && (
+        <StockNesting key={`n${gen}`} modelId={modelId} projectRef={projectRef} />
+      )}
     </div>
   );
 }
