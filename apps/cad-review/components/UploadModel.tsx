@@ -23,9 +23,13 @@ export function UploadModel() {
   const [phase, setPhase] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // A 409 from ingest: this exact file is already in this project. Held rather than thrown
+  // away, because the answer is usually "open that one" and occasionally "yes, again".
+  const [dup, setDup] = useState<Dup | null>(null);
 
-  async function submit(e: React.FormEvent) {
+  async function submit(e: React.FormEvent, allowDuplicate = false) {
     e.preventDefault();
+    setDup(null);
     const file = fileRef.current?.files?.[0];
     if (!file) { setErr("Choose a STEP file."); return; }
     if (!project.trim()) { setErr("A project number is required — it is stamped into every NC1 header and every piece mark."); return; }
@@ -36,12 +40,21 @@ export function UploadModel() {
       body.append("file", file);
       body.append("project_number", project.trim());
       const res = await fetch(
-        "/cad-review/api/cad/models/?identify=true&produce=true",
+        `/cad-review/api/cad/models/?identify=true&produce=true${
+          allowDuplicate ? "&allow_duplicate=true" : ""}`,
         { method: "POST", body });
       if (!res.ok) {
-        let detail = "";
+        let detail: unknown = "";
         try { detail = (await res.json())?.detail ?? ""; } catch { /* not json */ }
-        setErr(`Ingest returned ${res.status}${detail ? ` — ${detail}` : ""}`);
+        // The duplicate case is not an error to report and forget — it names the models it
+        // found, and the useful next action is to open one.
+        if (res.status === 409 && detail && typeof detail === "object"
+            && (detail as Dup).reason === "duplicate_file") {
+          setDup(detail as Dup);
+          return;
+        }
+        const msg = typeof detail === "string" ? detail : JSON.stringify(detail);
+        setErr(`Ingest returned ${res.status}${msg ? ` — ${msg}` : ""}`);
         return;
       }
       const { job_id } = await res.json();
@@ -92,6 +105,30 @@ export function UploadModel() {
           {phase} — this page can be left open; the work runs on the server.
         </p>
       )}
+      {dup && (
+        <div className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 space-y-2">
+          <p>{dup.message}</p>
+          <ul className="space-y-1">
+            {dup.models.map((m) => (
+              <li key={m.model_id} className="flex flex-wrap items-center gap-2">
+                <a href={`/cad-review/${m.model_id}/`}
+                   className="rounded bg-white px-2 py-1 font-medium underline">
+                  Open {m.model_id.slice(0, 8)}
+                </a>
+                <span className="tabular-nums text-amber-800">
+                  ingested {fmt(m.ingested_at)}
+                  {m.produced_at && ` · cut files ${fmt(m.produced_at)}`}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <button type="button" disabled={busy}
+                  onClick={(e) => submit(e, true)}
+                  className="rounded border border-amber-400 bg-white px-3 py-1 font-medium disabled:opacity-40">
+            Ingest anyway
+          </button>
+        </div>
+      )}
       {err && (
         <p className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
           {err}
@@ -104,6 +141,22 @@ export function UploadModel() {
       </p>
     </form>
   );
+}
+
+type Dup = {
+  reason: string;
+  message: string;
+  sha256: string;
+  models: { model_id: string; name: string; ingested_at: string | null;
+            produced_at: string | null }[];
+};
+
+/** Date and TIME. Two ingests of one file 49 minutes apart are indistinguishable by date. */
+function fmt(iso: string | null) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return `${d.toLocaleDateString("en-GB")} ${d.toLocaleTimeString("en-GB",
+    { hour: "2-digit", minute: "2-digit" })}`;
 }
 
 /** Poll the ingest job, reporting phases, and return the model id. */

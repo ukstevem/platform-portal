@@ -11,6 +11,17 @@ type Model = {
   ingested_at: string | null;
 };
 
+/** Rows sharing a project AND a filename cannot be told apart by either (bd dup).
+ *  Job 10353 holds two, ingested 49 minutes apart from the same file. */
+function ambiguous(models: Model[]): Set<string> {
+  const seen = new Map<string, string[]>();
+  for (const m of models) {
+    const k = `${m.project_ref ?? ""}|${m.name}`;
+    seen.set(k, [...(seen.get(k) ?? []), m.id]);
+  }
+  return new Set([...seen.values()].filter((ids) => ids.length > 1).flat());
+}
+
 const CAD_SERVICE_URL =
   process.env.CAD_SERVICE_URL ?? "http://host.docker.internal:8001";
 
@@ -28,6 +39,7 @@ async function getModels(): Promise<{ models: Model[]; error: string | null }> {
 
 export default async function ModelsPage() {
   const { models, error } = await getModels();
+  const dupes = ambiguous(models);
 
   return (
     <main className="p-6 max-w-5xl">
@@ -61,8 +73,15 @@ export default async function ModelsPage() {
                 {m.project_ref ?? "—"}
               </span>
               <span className="flex-1 truncate text-sm text-slate-700">{m.name}</span>
-              <span className="text-xs text-slate-400 shrink-0">
-                {m.ingested_at ? new Date(m.ingested_at).toLocaleDateString("en-GB") : ""}
+              {/* The TIME, but only where the date cannot separate them — noise otherwise. */}
+              <span className="shrink-0 text-xs tabular-nums text-slate-400">
+                {m.ingested_at
+                  ? dupes.has(m.id)
+                    ? new Date(m.ingested_at).toLocaleString("en-GB",
+                        { day: "2-digit", month: "2-digit", year: "numeric",
+                          hour: "2-digit", minute: "2-digit" })
+                    : new Date(m.ingested_at).toLocaleDateString("en-GB")
+                  : ""}
               </span>
             </Link>
           </li>
