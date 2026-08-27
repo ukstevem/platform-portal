@@ -18,13 +18,20 @@ const CAD_SERVICE_URL =
 async function forward(req: NextRequest, path: string[]) {
   const search = req.nextUrl.search ?? "";
   const url = `${CAD_SERVICE_URL}/api/v1/${path.join("/")}${search}`;
-  const init: RequestInit = {
-    method: req.method,
-    headers: { "Content-Type": "application/json" },
-    cache: "no-store",
-  };
+  const init: RequestInit = { method: req.method, cache: "no-store" };
   if (req.method !== "GET" && req.method !== "HEAD") {
-    init.body = await req.text();
+    const contentType = req.headers.get("content-type") ?? "";
+    if (contentType.startsWith("multipart/form-data")) {
+      // A STEP upload. The boundary lives IN the content-type header, so it must be passed
+      // through verbatim rather than rebuilt - and the body must stay bytes, because
+      // req.text() would corrupt it. Hard-coding application/json here is what made the
+      // front door impossible: every job had to be ingested for the user by an agent.
+      init.headers = { "Content-Type": contentType };
+      init.body = Buffer.from(await req.arrayBuffer());
+    } else {
+      init.headers = { "Content-Type": "application/json" };
+      init.body = await req.text();
+    }
   }
   try {
     const res = await fetch(url, init);

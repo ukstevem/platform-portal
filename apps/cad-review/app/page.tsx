@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { UploadModel } from "@/components/UploadModel";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +35,10 @@ export default async function ModelsPage() {
       <p className="text-sm text-slate-500 mb-6">
         Pick a model to review the parts the pipeline could not settle on its own.
       </p>
+
+      <div className="mb-6">
+        <UploadModel />
+      </div>
 
       {error && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
