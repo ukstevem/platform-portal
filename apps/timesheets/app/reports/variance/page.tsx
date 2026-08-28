@@ -269,7 +269,7 @@ function VariancePageInner() {
                 <tr key={r.id} className="hover:bg-gray-50">
                   <td className="border-b px-4 py-1.5">
                     <Link
-                      href={`/timesheets/?employee=${r.employee_id}&week=${r.week_start}`}
+                      href={`/?employee=${r.employee_id}&week=${r.week_start}`}
                       className="text-blue-600 hover:underline"
                     >
                       {empMap.get(r.employee_id) ?? r.employee_id.slice(0, 8)}
