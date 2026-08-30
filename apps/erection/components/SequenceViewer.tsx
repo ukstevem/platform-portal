@@ -172,6 +172,9 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
   const [progress, setProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
   const [missing, setMissing] = useState(0);
   const [skipped, setSkipped] = useState(0);
+  // Parts the model has but the plan put out of scope. Reported rather than silently dropped:
+  // a viewer showing less than the model holds should say so.
+  const [outOfScope, setOutOfScope] = useState(0);
 
   // Held in a ref so the click handler always sees the latest callback without the scene
   // being torn down and rebuilt whenever the parent re-renders.
@@ -193,12 +196,27 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
     setStatus("loading");
     setMissing(0);
     setSkipped(0);
+    setOutOfScope(0);
 
     let instances: Inst[] = [];
     try {
       const res = await fetch(`/erection/api/cad/models/${modelId}/scene/`, { cache: "no-store" });
       if (!res.ok) throw new Error(String(res.status));
       instances = (await res.json()).instances ?? [];
+      // /scene/ is the WHOLE model. instanceUnits is the palette, and a suppressed piece is
+      // absent from it - that is how scope leaves the view. Without this filter the viewer
+      // fetched a mesh for every prototype in the model however far out of scope it was: on job
+      // 10335 that means the 13,839-solid plant body and a 200 t pipe run, which drove the API
+      // to 13.6 GiB, killed it mid-load, and left the progress counter stuck partway.
+      //
+      // Only filter once the palette has arrived. An empty map means "not loaded yet", not
+      // "nothing is in scope", and treating those the same would render an empty model.
+      const inScope = unitsRef.current;
+      if (Object.keys(inScope).length > 0) {
+        const before = instances.length;
+        instances = instances.filter((i) => inScope[i.instance_id] !== undefined);
+        if (!stale()) setOutOfScope(before - instances.length);
+      }
     } catch {
       if (!stale()) setStatus("error");
       return;
@@ -257,14 +275,33 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
         // Retry a failed mesh: a dropped fetch here is a piece of steel missing from the
         // structure, and a viewer that quietly omits parts is worse than one that fails
         // loudly. The proxy retries the connection too; this covers the rest.
+        // force-cache first: a mesh only changes when the model does, and a warm cache is the
+        // difference between a scene that paints and one that re-tessellates. But an EMPTY
+        // result from cache is not an answer, it is a poisoned entry — when the API was being
+        // OOM-killed the browser cached the failures, and every later load replayed them
+        // without touching the network, so the viewer reported all 291 parts undrawable and a
+        // hard refresh could not clear it (a reload does not override an explicit fetch cache
+        // mode). So: if cache gives us nothing, ask again bypassing it. Self-healing rather
+        // than something only clearing site data can fix.
         for (let attempt = 0; attempt < 3; attempt++) {
+          const mode: RequestCache = attempt === 0 ? "force-cache" : "reload";
           try {
             const m = await fetch(
               `/erection/api/cad/models/${modelId}/prototype/${k}/mesh/?lod=5`,
-              { cache: "force-cache" });
+              { cache: mode });
             if (m.ok) {
-              geo.set(k, (await m.json()).bodies ?? []);
-              break;
+              const bodies = (await m.json()).bodies ?? [];
+              if (bodies.length) {
+                geo.set(k, bodies);
+                break;
+              }
+              // Empty on the LAST attempt is a real answer (a part with no solid); empty from
+              // cache is not to be trusted, so fall through and re-ask the server.
+              if (attempt === 2) {
+                geo.set(k, bodies);
+                break;
+              }
+              continue;
             }
             // 4xx is a real answer — the prototype has no mesh. Retrying wastes time.
             if (m.status < 500) break;
@@ -704,9 +741,16 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
             </button>
           </div>
 
-          {/* A model drawn with pieces missing must never look complete. */}
-          {(missing > 0 || skipped > 0) && (
+          {/* A model drawn with pieces missing must never look complete. Out of scope is a
+              different statement from could-not-be-drawn: one is a decision, the other a
+              failure, and they read in different colours for that reason. */}
+          {(missing > 0 || skipped > 0 || outOfScope > 0) && (
             <div className="absolute left-2 top-2 space-y-1">
+              {outOfScope > 0 && (
+                <div className="rounded bg-slate-700/90 px-2 py-1 text-xs font-medium text-slate-100">
+                  {outOfScope.toLocaleString()} part{outOfScope === 1 ? "" : "s"} out of scope — not drawn
+                </div>
+              )}
               {missing > 0 && (
                 <div className="rounded bg-amber-500/90 px-2 py-1 text-xs font-medium text-amber-950">
                   {missing} part{missing === 1 ? "" : "s"} could not be drawn
