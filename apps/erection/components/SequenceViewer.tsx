@@ -248,7 +248,24 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
     const cam = new THREE.PerspectiveCamera(45, 1, 0.1, 1e7);
     cam.up.set(0, 0, 1); // CAD is Z-up
     const ctrl = new OrbitControls(cam, renderer.domElement);
-    ctrl.enableDamping = true;
+    // No vertical stop. OrbitControls clamps the polar angle to [0, PI] by default, which in
+    // this Z-up scene means the orbit jams the moment the camera reaches straight-down or
+    // straight-up. You cannot carry on over the top of a frame to pick it up from the far
+    // side, and that is exactly the move someone makes to check a brace lands where they
+    // think it does. Dropping the configured limit lets the orbit run right up to both poles.
+    //
+    // It still cannot run THROUGH one. OrbitControls calls Spherical.makeSafe() immediately
+    // after this clamp, which pins the polar angle to within 1e-6 rad of each pole whatever
+    // is set here, and that is deliberate: cam.up is fixed at +Z, so crossing a pole would
+    // snap the whole view 180 degrees about the sight line. An epsilon short of vertical is
+    // as close to unrestricted as this control goes, and it does not read as a stop.
+    ctrl.minPolarAngle = -Infinity;
+    ctrl.maxPolarAngle = Infinity;
+    // Damping off, because it kept the model turning after the mouse button came up: a small
+    // nudge to look at one connection carried on past it and had to be nudged back. Motion
+    // now ends with the drag. The RAF loop still calls ctrl.update() every frame, which is
+    // what applies a zoom or a pan; with damping off it simply has no coast left to settle.
+    ctrl.enableDamping = false;
 
     sc.add(new THREE.AmbientLight(0xffffff, 0.72));
     const key = new THREE.DirectionalLight(0xffffff, 0.85);
@@ -439,6 +456,18 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
       const [x, y, z] = pos[v] ?? pos.iso;
       cam.position.set(target.x + x, target.y + y, target.z + z);
       cam.updateProjectionMatrix();
+      // Put up back to +Z. Orbiting over a pole negates it (see crossPole below), and a
+      // named view taken while it is inverted comes out rolled 180 degrees. Reasserting it
+      // here makes every toolbar button - and Fit - double as the way back to level, so a
+      // planner who has tumbled the model and lost their bearings is one click from
+      // straight again.
+      //
+      // Top is the degenerate one: [0, 0, d] puts the camera exactly on the +Z axis with up
+      // along it too, which leaves the roll undefined. It survives only because ctrl.update()
+      // runs makeSafe(), which nudges the polar angle 1e-6 off the pole before lookAt is
+      // applied. That was already the case before any of this; setting up here restores the
+      // same starting condition rather than introducing a new one.
+      cam.up.set(0, 0, 1);
       ctrl.target.copy(target);
       ctrl.update();
     };
@@ -475,6 +504,72 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
     renderer.domElement.addEventListener("pointerdown", onDown);
     renderer.domElement.addEventListener("pointerup", onUp);
 
+    // Orbiting over the poles.
+    //
+    // OrbitControls cannot orbit THROUGH a pole. Whatever minPolarAngle and maxPolarAngle
+    // are set to, update() finishes with Spherical.makeSafe(), which pins the polar angle to
+    // within 1e-6 rad of straight-down and straight-up. The orbit stops dead there, so you
+    // cannot carry on over the top of a frame to come at it from the far side - which is the
+    // move someone makes to check what a brace actually lands on.
+    //
+    // So the camera is hopped across the pole here instead. When a drag has it pinned and is
+    // still pushing further in, it is mirrored to the opposite azimuth at the same height -
+    // where it would have got to had it been allowed to continue - and cam.up is negated, so
+    // the pole it now approaches is the one it just came over. Dragging carries on down the
+    // far side with no stop.
+    //
+    // Negating up is what it costs: the view rolls 180 degrees at the instant of crossing.
+    // That is inherent to a fixed up-vector rather than a shortcoming of this code - a
+    // turntable cannot be both the right way up and continuous across its own axis - and it
+    // is the accepted price of not stopping. frame() puts up back to +Z, so any named view
+    // or Fit undoes it.
+    //
+    // Mouse only. A one-finger touch and a two-finger pan both arrive as button 0, so on a
+    // touchscreen a pan while parked at the pole would read as a push through it.
+    const POLE_EPS = 1e-3;      // "pinned" - makeSafe holds it at 1e-6, well inside this
+    let orbiting = false;
+    let lastPointerY = 0;
+    let pushY = 0;              // vertical drag since the last frame, in screen pixels
+    // Modifiers excluded because OrbitControls reads left+ctrl/meta/shift as a PAN, not a
+    // rotate: without this, shift-dragging to pan while parked on the pole would flip it.
+    const onPoleDown = (e: PointerEvent) => {
+      if (e.pointerType !== "mouse" || e.button !== 0) return;
+      if (e.ctrlKey || e.metaKey || e.shiftKey) return;
+      orbiting = true; lastPointerY = e.clientY; pushY = 0;
+    };
+    const onPoleMove = (e: PointerEvent) => {
+      if (!orbiting) return;
+      // The button can come up without a pointerup reaching us - alt-tab, or a context
+      // menu stealing the release. Without this the next stray move over the canvas would
+      // still count as a push and could flip the model while nobody is dragging.
+      if (e.buttons === 0) { orbiting = false; pushY = 0; return; }
+      pushY += e.clientY - lastPointerY;
+      lastPointerY = e.clientY;
+    };
+    const onPoleEnd = () => { orbiting = false; pushY = 0; };
+    renderer.domElement.addEventListener("pointerdown", onPoleDown);
+    renderer.domElement.addEventListener("pointermove", onPoleMove);
+    renderer.domElement.addEventListener("pointerup", onPoleEnd);
+    renderer.domElement.addEventListener("pointercancel", onPoleEnd);
+
+    // Dragging DOWN drives the polar angle towards zero - OrbitControls' rotateUp subtracts
+    // from phi - so a positive push is heading for the top pole and a negative one the bottom.
+    const crossPole = () => {
+      if (!orbiting || pushY === 0) return;
+      const phi = ctrl.getPolarAngle();
+      const over = (phi <= POLE_EPS && pushY > 0) || (phi >= Math.PI - POLE_EPS && pushY < 0);
+      pushY = 0;
+      if (!over) return;
+      // Mirror the offset about the up axis: keep the part along up, negate the rest. The
+      // camera lands as far past the pole as it was short of it, which is a few thousandths
+      // of a radian, so the position moves imperceptibly and only the roll is visible.
+      const off = cam.position.clone().sub(ctrl.target);
+      const along = cam.up.clone().multiplyScalar(off.dot(cam.up));
+      cam.position.copy(ctrl.target).add(off.sub(along).negate().add(along));
+      cam.up.negate();
+      ctrl.update();
+    };
+
     let sizedW = 0, sizedH = 0;
     const fit = () => {
       const w = el.clientWidth, h = el.clientHeight;
@@ -496,6 +591,9 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
       // out yet) corrects itself on the next frame rather than staying 300x150 forever.
       fit();
       ctrl.update();
+      // After update(), so it reads the polar angle that makeSafe has just clamped, and
+      // before the render, so a crossing is never shown as a stalled frame at the pole.
+      crossPole();
       renderer.render(sc, cam);
     };
     loop();
@@ -511,6 +609,10 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
         ctrl.dispose();
         renderer.domElement.removeEventListener("pointerdown", onDown);
         renderer.domElement.removeEventListener("pointerup", onUp);
+        renderer.domElement.removeEventListener("pointerdown", onPoleDown);
+        renderer.domElement.removeEventListener("pointermove", onPoleMove);
+        renderer.domElement.removeEventListener("pointerup", onPoleEnd);
+        renderer.domElement.removeEventListener("pointercancel", onPoleEnd);
         // Dispose the CACHE, not each mesh: geometry is shared, so a per-mesh dispose
         // would free a buffer its siblings are still drawing from.
         geomCache.forEach((g) => g.dispose());
