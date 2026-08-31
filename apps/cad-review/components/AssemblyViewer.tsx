@@ -77,6 +77,7 @@ export function AssemblyViewer({ modelId, prefix, className }: {
       if (!bodies?.length) return;
       const colour = COLOURS[keys.indexOf(inst.prototype_key) % COLOURS.length];
       bodies.forEach((b) => {
+        if (!b) return;   // index placeholder — bodies[N] is solid N
         const g = new THREE.BufferGeometry();
         g.setAttribute("position", new THREE.Float32BufferAttribute(b.v, 3));
         g.setIndex(b.f); g.computeVertexNormals();

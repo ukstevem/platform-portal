@@ -95,7 +95,9 @@ export function PartViewer({ modelId, fingerprintKey }: {
       const root = new THREE.Group();
       scene.add(root);
 
+      // A null body is a deliberate index placeholder (bodies[N] is solid N), not an error.
       (data.bodies || []).forEach((b, i) => {
+        if (!b) return;
         const g = new THREE.BufferGeometry();
         g.setAttribute("position", new THREE.Float32BufferAttribute(b.v, 3));
         g.setIndex(b.f);
