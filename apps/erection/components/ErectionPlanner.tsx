@@ -561,6 +561,43 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
   };
 
   const [pdfState, setPdfState] = useState<string | null>(null);
+  const [snapState, setSnapState] = useState<string | null>(null);
+
+  /**
+   * Snapshot the database — a verified pg_dump, taken on demand.
+   *
+   * The work that cannot be rebuilt is the human judgement: make/buy/exclude, reclassifications,
+   * groupings, and this sequence. Geometry re-derives from the STEP file; decisions do not. The
+   * database lives on a docker volume that has already been destroyed once by a test run pointed
+   * at the wrong place, so "I have done a useful hour, keep it" needs to be one click.
+   *
+   * There is no restore button, deliberately. Taking a snapshot is safe; putting one back
+   * destroys everything since, and that belongs behind a command somebody has to mean:
+   *   scripts/snapshot.sh list
+   *   scripts/snapshot.sh restore <name>
+   */
+  const snapshot = useCallback(async () => {
+    setSnapState("Saving…");
+    try {
+      // Not api(): that helper is scoped to /models/<id>/erection/, and a snapshot is
+      // whole-database, not per-model.
+      const res = await fetch("/erection/api/cad/admin/snapshot/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label: projectRef ? `job ${projectRef}` : null }),
+      });
+      if (!res.ok) throw new Error(`snapshot failed (${res.status})`);
+      const m = await res.json();
+      // Report what the RESTORE CHECK found, not what was written. A dump that cannot be
+      // restored is not a snapshot, and the count is the proof it came back.
+      const v = m.verified ?? {};
+      setSnapState(`Saved · ${v.cas_source_model ?? 0} models, ${v.cas_erection_step ?? 0} steps`);
+      setTimeout(() => setSnapState(null), 6000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not take a snapshot");
+      setSnapState(null);
+    }
+  }, [modelId, projectRef]);
 
   const exportPdf = useCallback(async (withImages: boolean) => {
     const images: Record<string, string> = {};
@@ -699,6 +736,11 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
           <button onClick={() => exportPdf(true)} disabled={steps.length === 0 || !!pdfState}
             className="rounded-md bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50">
             {pdfState ?? "PDF with views"}
+          </button>
+          <button onClick={snapshot} disabled={!!snapState}
+            title="Verified backup of every model, decision and plan in the database"
+            className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50">
+            {snapState ?? "Save snapshot"}
           </button>
         </div>
       </div>
