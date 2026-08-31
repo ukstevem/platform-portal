@@ -275,19 +275,31 @@ export const SequenceViewer = forwardRef<ViewerHandle, {
         // Retry a failed mesh: a dropped fetch here is a piece of steel missing from the
         // structure, and a viewer that quietly omits parts is worse than one that fails
         // loudly. The proxy retries the connection too; this covers the rest.
-        // force-cache first: a mesh only changes when the model does, and a warm cache is the
-        // difference between a scene that paints and one that re-tessellates. But an EMPTY
-        // result from cache is not an answer, it is a poisoned entry — when the API was being
-        // OOM-killed the browser cached the failures, and every later load replayed them
-        // without touching the network, so the viewer reported all 291 parts undrawable and a
-        // hard refresh could not clear it (a reload does not override an explicit fetch cache
-        // mode). So: if cache gives us nothing, ask again bypassing it. Self-healing rather
-        // than something only clearing site data can fix.
+        // "default", NOT "force-cache". A mesh only changes when the model does, so a warm
+        // cache is still the difference between a scene that paints and one that
+        // re-tessellates — but force-cache is defined as returning a stored match "fresh or
+        // stale" WITHOUT asking the server, and the mesh URL does not change when the geometry
+        // does. So when the box proxy changed from axis-aligned to ORIENTED, every browser
+        // that had already loaded the model kept drawing the old boxes, and no refresh could
+        // clear it (a reload does not override an explicit fetch cache mode). The API now sends
+        // an ETag with Cache-Control: no-cache, so "default" revalidates: a 304 when the
+        // geometry is unchanged, which is nearly free, and fresh bytes the moment it is not.
+        //
+        // The retry stays. An EMPTY result from cache is not an answer, it is a poisoned entry
+        // — when the API was being OOM-killed the browser cached the failures and every later
+        // load replayed them, so the viewer reported all 291 parts undrawable. If cache gives
+        // us nothing, ask again bypassing it: self-healing rather than something only clearing
+        // site data can fix.
         for (let attempt = 0; attempt < 3; attempt++) {
-          const mode: RequestCache = attempt === 0 ? "force-cache" : "reload";
+          const mode: RequestCache = attempt === 0 ? "default" : "reload";
           try {
             const m = await fetch(
-              `/erection/api/cad/models/${modelId}/prototype/${k}/mesh/?lod=5`,
+              // proxy=false: above 400 solids the API serves convex HULLS by default, and a
+              // hull fills a channel's opening exactly as a box does. Neither can show what a
+              // member IS, which is what an erection planner is looking at the model to find
+              // out. lod=15 keeps it affordable: 2.9 M triangles for 10335 against 7.3 M at
+              // review deflection, and a 15 mm chord error is invisible on a 180 mm channel.
+              `/erection/api/cad/models/${modelId}/prototype/${k}/mesh/?lod=15&proxy=false`,
               { cache: mode });
             if (m.ok) {
               const bodies = (await m.json()).bodies ?? [];

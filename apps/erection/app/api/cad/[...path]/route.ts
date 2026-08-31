@@ -43,9 +43,16 @@ async function fetchWithRetry(url: string, init: RequestInit, attempts = 3) {
 async function forward(req: NextRequest, path: string[]) {
   const search = req.nextUrl.search ?? "";
   const url = `${CAD_SERVICE_URL}/api/v1/${path.join("/")}${search}`;
+  // Carry the client's validator UPSTREAM. Without it the browser's If-None-Match never
+  // reaches the CAD service, so it can never answer 304 and the viewer either re-downloads a
+  // 4 MB mesh every load or — worse, with force-cache — never asks at all and draws geometry
+  // from before the model changed.
+  const reqHeaders: Record<string, string> = { "Content-Type": "application/json" };
+  const inm = req.headers.get("if-none-match");
+  if (inm) reqHeaders["If-None-Match"] = inm;
   const init: RequestInit = {
     method: req.method,
-    headers: { "Content-Type": "application/json" },
+    headers: reqHeaders,
     cache: "no-store",
   };
   if (req.method !== "GET" && req.method !== "HEAD") {
@@ -53,7 +60,6 @@ async function forward(req: NextRequest, path: string[]) {
   }
   try {
     const res = await fetchWithRetry(url, init);
-    const body = await res.arrayBuffer();
     const headers: Record<string, string> = {
       "Content-Type": res.headers.get("content-type") ?? "application/json",
     };
@@ -61,6 +67,28 @@ async function forward(req: NextRequest, path: string[]) {
     // folder of files called "sequence.pdf" is useless to whoever takes them to site.
     const cd = res.headers.get("content-disposition");
     if (cd) headers["Content-Disposition"] = cd;
+    // ...and the cache VALIDATORS back down. A proxy that drops these turns a revalidating
+    // fetch into an unconditional one, and leaves the browser free to keep serving a mesh
+    // from before the geometry changed.
+    for (const h of ["etag", "cache-control", "last-modified"]) {
+      const v = res.headers.get(h);
+      if (v) headers[h] = v;
+    }
+    // 304 carries no body, and constructing a response with one is a runtime error.
+    if (res.status === 304) return new NextResponse(null, { status: 304, headers });
+    const body = await res.arrayBuffer();
+    // COMPRESS. A mesh is JSON numbers and compresses about 6x; undici transparently decodes
+    // the upstream gzip, so without re-compressing here the browser is handed the full ~60 MB
+    // of a whole-model view over the wire. Only worth it above a threshold — a small JSON reply
+    // costs more in CPU than it saves in bytes.
+    const wantsGzip = (req.headers.get("accept-encoding") ?? "").includes("gzip");
+    if (wantsGzip && body.byteLength > 1_000_000 && !headers["content-encoding"]) {
+      const { gzipSync } = await import("node:zlib");
+      const packed = gzipSync(Buffer.from(body), { level: 6 });
+      headers["Content-Encoding"] = "gzip";
+      headers["Vary"] = "Accept-Encoding";
+      return new NextResponse(packed, { status: res.status, headers });
+    }
     return new NextResponse(body, { status: res.status, headers });
   } catch (err) {
     console.error("erection proxy failed:", url, err);
