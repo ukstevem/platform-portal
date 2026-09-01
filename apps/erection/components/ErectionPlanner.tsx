@@ -829,6 +829,11 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
             push the sequence off the screen — which is exactly what it did when the editor
             was free to grow with a hundred-piece lift. */}
         <div className="flex min-h-0 flex-col gap-3">
+          {/* Sequence and Out of scope are the same column, never both at once. Setting scope is
+              deciding WHICH MODEL you are planning; sequencing is deciding the order it goes up.
+              Showing the sequence while that first question is still open invites clicking pieces
+              into steps that a moment later leave the palette entirely. */}
+          {!suppressMode && (
           <div className="min-h-[12rem] flex-1 overflow-auto rounded-lg border border-slate-200 bg-white">
             <div className="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <span>Sequence</span>
@@ -955,6 +960,7 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
               })}
             </ul>
           </div>
+          )}
 
           {/* Welded together. The model tree says these are separate lifts; the geometry says they
               arrive as one piece. Advisory — detection is best-effort and the planner may have a
@@ -1001,20 +1007,31 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
           )}
 
           {/* What has been put aside. Scope you cannot see is scope that gets forgotten — and
-              the tonnage is shown so a 561 t omission is never silent (bd tjf). */}
-          {suppressed.length > 0 && (
-            <div className="shrink-0 rounded-lg border border-amber-300 bg-amber-50">
+              the tonnage is shown so a 561 t omission is never silent (bd tjf). Shown only while
+              scope is being set: that is when it is the thing being worked on, and it takes the
+              column the sequence has given up. It is still rendered when EMPTY, so turning Set
+              scope on does not leave a blank column with no sign of what to do next. */}
+          {suppressMode && (
+            <div className="flex min-h-[12rem] flex-1 flex-col overflow-hidden rounded-lg border border-amber-300 bg-amber-50">
               <div className="flex items-center justify-between border-b border-amber-200 px-3 py-1.5">
                 <span className="text-xs font-semibold uppercase tracking-wide text-amber-900">
                   Out of scope ({suppressed.length}) · {Math.round(suppressedMass).toLocaleString("en-GB")} kg
                 </span>
-                <button
-                  onClick={() => setScope(suppressed.map((u) => u.unit_path), false)}
-                  disabled={!!busy}
-                  className="text-xs text-amber-800 hover:text-amber-950 disabled:opacity-40"
-                >Restore all</button>
+                {suppressed.length > 0 && (
+                  <button
+                    onClick={() => setScope(suppressed.map((u) => u.unit_path), false)}
+                    disabled={!!busy}
+                    className="text-xs text-amber-800 hover:text-amber-950 disabled:opacity-40"
+                  >Restore all</button>
+                )}
               </div>
-              <ul className="max-h-32 space-y-0.5 overflow-auto px-3 py-1.5">
+              {suppressed.length === 0 && (
+                <p className="px-3 py-3 text-xs text-amber-800">
+                  Nothing out of scope. Click pieces in the 3D view to put them aside, then turn
+                  <b> Choosing scope…</b> off to sequence what is left.
+                </p>
+              )}
+              <ul className="min-h-0 flex-1 space-y-0.5 overflow-auto px-3 py-1.5">
                 {suppressed.map((u) => (
                   <li key={u.unit_path} className="flex items-center gap-2 text-xs">
                     <span className="min-w-0 flex-1 truncate text-amber-900" title={u.unit_path}>

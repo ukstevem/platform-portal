@@ -52,18 +52,35 @@ export function AssemblyViewer({ modelId, prefix, className }: {
     scene.background = new THREE.Color(0xeef1f4);
     const cam = new THREE.PerspectiveCamera(45, 1, 0.1, 1e7);
     cam.up.set(0, 0, 1);                       // CAD is Z-up
-    const ctrl = new OrbitControls(cam, renderer.domElement);
-    // No vertical stop: the default [0, PI] polar clamp jams the orbit at straight-down and
-    // straight-up, so an assembly cannot be carried over the top to be read from underneath —
-    // which is how you check what a bracket actually sits on. It still stops an epsilon short
-    // of each pole, because OrbitControls calls Spherical.makeSafe() after this clamp and pins
-    // it there whatever is set; the fixed +Z up vector would flip the view on a true crossing.
-    ctrl.minPolarAngle = -Infinity;
-    ctrl.maxPolarAngle = Infinity;
-    // Damping off: it left the assembly turning after the button came up, so a nudge to look
-    // at one end overshot and had to be brought back. Motion now ends with the drag, and the
-    // RAF loop's ctrl.update() stays — it is what applies zoom and pan, damping or not.
-    ctrl.enableDamping = false;
+    // OrbitControls freezes its orbit axis at construction — update() is an IIFE that reads
+    // object.up once and reuses that quaternion forever (three 0.164.1, OrbitControls.js:177)
+    // — so cam.up cannot be changed in place; the axis only moves by building a new instance.
+    // Every setting therefore lives here, where both the first creation and every rebuild go
+    // through, so the two cannot drift apart.
+    const newControls = (target?: InstanceType<typeof THREE.Vector3>) => {
+      const c = new OrbitControls(cam, renderer.domElement);
+      // Lifting the polar limit does nothing on its own: update() ends with makeSafe(), which
+      // pins the angle within 1e-6 rad of each pole regardless. crossPole below is what gets
+      // past one; these are set so that clamp is the only thing left holding the orbit.
+      c.minPolarAngle = -Infinity;
+      c.maxPolarAngle = Infinity;
+      // Damping off: it left the assembly turning after the button came up, so a nudge to
+      // look at one end overshot and had to be brought back. Motion now ends with the drag.
+      c.enableDamping = false;
+      if (target) c.target.copy(target);
+      return c;
+    };
+    // Mutable: a crossing replaces the instance, and the framing function, the RAF loop and
+    // dispose all close over this binding, so reassigning redirects every one of them.
+    let ctrl = newControls();
+    let ctrlUp = cam.up.clone();
+    const syncControls = () => {
+      if (ctrlUp.equals(cam.up)) return;
+      const t = ctrl.target.clone();
+      ctrl.dispose();                  // or listeners accumulate one set per crossing
+      ctrl = newControls(t);
+      ctrlUp = cam.up.clone();
+    };
     scene.add(new THREE.AmbientLight(0xffffff, 0.75));
     const dl = new THREE.DirectionalLight(0xffffff, 0.7);
     dl.position.set(1, 1.3, 1.2); scene.add(dl);
@@ -110,12 +127,15 @@ export function AssemblyViewer({ modelId, prefix, className }: {
       };
       const [x, y, z] = pos[v] ?? pos.iso;
       cam.position.set(centre.x + x, centre.y + y, centre.z + z);
-      // Up back to +Z: orbiting over a pole negates it (see crossPole below), and a named
-      // view taken while it is inverted comes out rolled 180 degrees. These four buttons are
-      // therefore also the way back to level. Top stays degenerate - [0, 0, d] is on the +Z
-      // axis with up along it - and still survives on makeSafe() nudging the polar angle
-      // 1e-6 off the pole inside update(), exactly as it did before.
+      // Up back to +Z, rebuilding the controls if that changed it: a crossing leaves the
+      // assembly orbiting about -Z, and without the rebuild a named view would render the
+      // right way up while the controls still turned about the inverted axis, so the vertical
+      // drag would run backwards. These four buttons are therefore also the way back to
+      // level. Top stays degenerate - [0, 0, d] is on the +Z axis with up along it - and
+      // still survives on makeSafe() nudging the polar angle 1e-6 off the pole inside
+      // update(), exactly as it did before.
       cam.up.set(0, 0, 1);
+      syncControls();
       cam.updateProjectionMatrix(); ctrl.target.copy(centre); ctrl.update();
     };
     view.current("iso");
@@ -123,32 +143,49 @@ export function AssemblyViewer({ modelId, prefix, className }: {
     // Orbiting over the poles. OrbitControls stops dead at straight-up and straight-down
     // because update() ends with Spherical.makeSafe(), which pins the polar angle within
     // 1e-6 rad of each pole whatever the min/max are set to. So when a drag has the camera
-    // pinned and is still pushing in, mirror it to the opposite azimuth at the same height
-    // and negate cam.up: the orbit carries on down the far side instead of stopping. The
-    // cost is a 180 degree roll at the instant of crossing, which is inherent to holding a
-    // fixed up-vector, not a defect here - the four view buttons above reset it. Mouse only,
-    // since a two-finger touch pan also arrives as button 0 and would read as a push.
+    // pinned and is still pushing in: mirror it to the opposite azimuth at the same height,
+    // negate cam.up, and rebuild the controls so the new axis is actually read. All three are
+    // needed - without the rebuild the first two only roll the picture while the orbit stays
+    // stopped. Mirroring and negating cancel each other's effect on the image, so there is no
+    // snap to see; what changes is that a sideways drag orbits the other way while inverted,
+    // until one of the four view buttons above puts it back. Mouse only, since a two-finger
+    // touch pan also arrives as button 0 and would read as a push.
     const POLE_EPS = 1e-3;
-    let orbiting = false, lastPointerY = 0, pushY = 0;
+    let orbiting = false, pushY = 0;
+    let drag: { id: number; x: number; y: number } | null = null;
     // Modifiers excluded: OrbitControls treats left+ctrl/meta/shift as a pan, not a rotate.
+    // isTrusted excluded so the synthetic re-grab below does not reset the push it just made.
     const onPoleDown = (e: PointerEvent) => {
-      if (e.pointerType !== "mouse" || e.button !== 0) return;
+      if (!e.isTrusted || e.pointerType !== "mouse" || e.button !== 0) return;
       if (e.ctrlKey || e.metaKey || e.shiftKey) return;
-      orbiting = true; lastPointerY = e.clientY; pushY = 0;
+      orbiting = true; drag = { id: e.pointerId, x: e.clientX, y: e.clientY }; pushY = 0;
     };
     const onPoleMove = (e: PointerEvent) => {
-      if (!orbiting) return;
+      if (!orbiting || !drag) return;
       // The button can come up without a pointerup reaching us - alt-tab, or a context
       // menu stealing the release. Without this the next stray move over the canvas would
       // still count as a push and could flip the model while nobody is dragging.
-      if (e.buttons === 0) { orbiting = false; pushY = 0; return; }
-      pushY += e.clientY - lastPointerY; lastPointerY = e.clientY;
+      if (e.buttons === 0) { orbiting = false; drag = null; pushY = 0; return; }
+      pushY += e.clientY - drag.y; drag = { id: drag.id, x: e.clientX, y: e.clientY };
     };
-    const onPoleEnd = () => { orbiting = false; pushY = 0; };
+    const onPoleEnd = () => { orbiting = false; drag = null; pushY = 0; };
+    // Ours, on the canvas rather than on the controls, so a rebuild leaves them alone. They
+    // must NOT be re-added there or every drag would be counted twice.
     renderer.domElement.addEventListener("pointerdown", onPoleDown);
     renderer.domElement.addEventListener("pointermove", onPoleMove);
     renderer.domElement.addEventListener("pointerup", onPoleEnd);
     renderer.domElement.addEventListener("pointercancel", onPoleEnd);
+    // A rebuilt instance has no idea a drag is under way: OrbitControls only attaches its
+    // pointermove and pointerup listeners inside onPointerDown (OrbitControls.js:1019), so
+    // the orbit would sit dead until the mouse was released and pressed again - the same
+    // stop, just moved past the pole. A synthetic pointerdown hands it the drag in progress.
+    const regrab = () => {
+      if (!drag) return;
+      renderer.domElement.dispatchEvent(new PointerEvent("pointerdown", {
+        pointerId: drag.id, pointerType: "mouse", button: 0, buttons: 1,
+        clientX: drag.x, clientY: drag.y, bubbles: true,
+      }));
+    };
     // Dragging down drives the polar angle towards zero, so a positive push heads for the
     // top pole and a negative one for the bottom.
     const crossPole = () => {
@@ -157,13 +194,13 @@ export function AssemblyViewer({ modelId, prefix, className }: {
       const over = (phi <= POLE_EPS && pushY > 0) || (phi >= Math.PI - POLE_EPS && pushY < 0);
       pushY = 0;
       if (!over) return;
-      // Keep the component along up, negate the rest: the camera lands as far past the pole
-      // as it was short of it, a few thousandths of a radian, so only the roll is visible.
       const off = cam.position.clone().sub(ctrl.target);
       const along = cam.up.clone().multiplyScalar(off.dot(cam.up));
       cam.position.copy(ctrl.target).add(off.sub(along).negate().add(along));
       cam.up.negate();
+      syncControls();
       ctrl.update();
+      regrab();
     };
 
     const fit = () => {
