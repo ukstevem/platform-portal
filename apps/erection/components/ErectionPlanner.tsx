@@ -354,6 +354,16 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
   // but the drop handler must not read it: dragstart and drop can land in the same React
   // batch, and the drop closure then still sees null and silently does nothing. The ref is
   // set synchronously, so the drop always knows what it is holding.
+  /**
+   * A SELECTION of steps, so a run of them can be moved in one go.
+   *
+   * Moving 48-54 to position 10 one step at a time is seven drags, and every one of them shifts
+   * the indices under the next — so it is seven drags plus the arithmetic to work out where each
+   * one now has to land. Shift-click marks the run, and dragging any member carries the whole
+   * block, keeping its internal order.
+   */
+  const [stepSelection, setStepSelection] = useState<Set<string>>(new Set());
+  const stepScrollRef = useRef<HTMLDivElement>(null);
   const dragIdRef = useRef<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
@@ -438,6 +448,54 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
       loadPlan();
     }
   }, [steps, modelId, loadPlan]);
+
+  /** Drop every selected step at `toIndex`, keeping their order among themselves. */
+  const moveMany = useCallback(async (ids: string[], toIndex: number) => {
+    const held = new Set(ids);
+    // The steps being carried, in the order they currently appear — a block keeps its internal
+    // sequence, which is the whole point of moving it as a block.
+    const carried = steps.filter((s) => held.has(s.id)).map((s) => s.id);
+    if (carried.length === 0) return;
+    const rest = steps.filter((s) => !held.has(s.id)).map((s) => s.id);
+    // toIndex counts positions in the FULL list; translate it to a position among what is left,
+    // or dropping a block below where it started lands it short by its own length.
+    const target = steps[toIndex]?.id;
+    let at = target && !held.has(target) ? rest.indexOf(target) : rest.length;
+    if (at < 0) at = rest.length;
+    const order = [...rest.slice(0, at), ...carried, ...rest.slice(at)];
+    setPlan((p) => p && { ...p, steps: order.map((id, n) => {
+      const st = steps.find((x) => x.id === id)!;
+      return { ...st, seq: n + 1 };
+    }) });
+    try {
+      setPlan(await call<Plan>(api(modelId, "steps/order/"), {
+        method: "PUT", body: JSON.stringify({ step_ids: order }),
+      }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not reorder");
+      loadPlan();
+    }
+  }, [steps, modelId, loadPlan]);
+
+  /**
+   * Scroll the list while a drag hovers near its edge.
+   *
+   * Without this a step can only be dropped where it can already be seen: dragging upwards stops
+   * dead at the top of the visible list, so moving step 48 to step 10 is impossible in one go
+   * however far you drag. HTML5 drag-and-drop fires no scroll of its own, so it has to be driven
+   * from dragover.
+   */
+  const autoScroll = useCallback((clientY: number) => {
+    const el = stepScrollRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const EDGE = 56;                       // a comfortable target, about two rows
+    const MAX = 18;                        // px per frame at the very edge
+    let d = 0;
+    if (clientY < r.top + EDGE) d = -Math.ceil(((r.top + EDGE - clientY) / EDGE) * MAX);
+    else if (clientY > r.bottom - EDGE) d = Math.ceil(((clientY - (r.bottom - EDGE)) / EDGE) * MAX);
+    if (d) el.scrollTop += d;
+  }, []);
 
   /**
    * Move some of a step's pieces into their own lift.
@@ -560,6 +618,62 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
     window.location.href = api(modelId, path);
   };
 
+  /**
+   * Everything sharing a section with what is selected.
+   *
+   * Scoping a big model piece by piece is unusable: job 10335 carries 595 purlins, and nobody is
+   * clicking 595 times. Section is the right handle because it is how a fabricator already thinks
+   * about the model — "the purlins", "the PL10s" — so one click on a purlin plus Select similar
+   * puts the whole run in the selection ready to suppress.
+   *
+   * Designation, not name or mass: it is the one field that means the same thing across every
+   * piece of a run. Pieces without one are never matched, or a single untyped selection would
+   * sweep up every other untyped piece in the job.
+   */
+  const similar = useMemo(() => {
+    const wanted = new Set<string>();
+    for (const p of scopeSelection) {
+      for (const m of unitByPath[p]?.marks ?? []) if (m.designation) wanted.add(m.designation);
+    }
+    if (wanted.size === 0) return { paths: [] as string[], labels: [] as string[] };
+    const paths = units
+      .filter((u) => (u.marks ?? []).some((m) => m.designation && wanted.has(m.designation)))
+      .map((u) => u.unit_path);
+    return { paths, labels: [...wanted].sort() };
+  }, [scopeSelection, unitByPath, units]);
+
+  /**
+   * Out of scope, grouped by section.
+   *
+   * One row per piece is unusable at this size: suppressing the purlins on job 10335 puts 570
+   * identical C200/100/30x3 entries in the panel, and finding anything else among them — or
+   * putting them all back — means scrolling 631 rows. A fabricator suppresses "the purlins" and
+   * restores "the purlins", so the panel is built on the same unit the decision was.
+   *
+   * Ordered by count, so the bulk suppression you just made is at the top where you left it.
+   *
+   * A group EXPANDS, because restoring by section is not the only thing anybody wants. The 30
+   * named assemblies here — an elevator, several pipe runs — carry no designation, so they share
+   * one "Unclassified" row; without expanding it, bringing one elevator back would mean bringing
+   * all thirty. Bulk is the common case, not the only one.
+   */
+  const suppressedGroups = useMemo(() => {
+    const by = new Map<string, { key: string; units: Unit[]; mass: number; parts: number }>();
+    for (const u of suppressed) {
+      // "Multibody assemblies", not "Unclassified": these are not unidentified steel, they are
+      // plant — an elevator, pipe runs, a mill. They land together because the grouping key is a
+      // SECTION SIZE and a proprietary assembly has not got one, which says nothing about them.
+      const d = (u.marks ?? []).find((m) => m.designation)?.designation ?? "Multibody assemblies";
+      const g = by.get(d) ?? { key: d, units: [], mass: 0, parts: 0 };
+      g.units.push(u);
+      g.mass += u.mass_kg ?? 0;
+      g.parts += u.part_count ?? 1;
+      by.set(d, g);
+    }
+    return [...by.values()].sort((a, b) => b.units.length - a.units.length);
+  }, [suppressed]);
+
+  const [openScopeGroup, setOpenScopeGroup] = useState<string | null>(null);
   const [pdfState, setPdfState] = useState<string | null>(null);
   const [snapState, setSnapState] = useState<string | null>(null);
 
@@ -690,6 +804,18 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
                 ? `${scopeSelection.size} selected`
                 : "Click pieces in the 3D view"}
             </span>
+            <button
+              onClick={() => setScopeSelection(new Set(similar.paths))}
+              disabled={similar.paths.length === 0 || !!busy}
+              title={similar.labels.length
+                ? `Select every piece of ${similar.labels.join(", ")}`
+                : "Select a piece with a section first"}
+              className="rounded border border-sky-400 bg-sky-50 px-2 py-1 text-xs font-medium text-sky-800 hover:bg-sky-100 disabled:opacity-30"
+            >
+              {similar.paths.length > scopeSelection.size
+                ? `Select similar (${similar.paths.length} ${similar.labels.join(", ")})`
+                : "Select similar"}
+            </button>
             <button
               onClick={() => { setScope([...scopeSelection], true); setScopeSelection(new Set()); }}
               disabled={scopeSelection.size === 0 || !!busy}
@@ -834,10 +960,23 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
               Showing the sequence while that first question is still open invites clicking pieces
               into steps that a moment later leave the palette entirely. */}
           {!suppressMode && (
-          <div className="min-h-[12rem] flex-1 overflow-auto rounded-lg border border-slate-200 bg-white">
+          <div ref={stepScrollRef}
+               className="min-h-[12rem] flex-1 overflow-auto rounded-lg border border-slate-200 bg-white">
             <div className="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <span>Sequence</span>
-              <span>{steps.length} step{steps.length === 1 ? "" : "s"}</span>
+              {stepSelection.size > 1 ? (
+                <span className="flex items-center gap-2 normal-case tracking-normal">
+                  <span className="text-sky-700">{stepSelection.size} selected — drag to move together</span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setStepSelection(new Set()); }}
+                    className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-white"
+                  >Clear</button>
+                </span>
+              ) : (
+                <span title="Shift-click to select a run of steps, ctrl-click to pick individually">
+                  {steps.length} step{steps.length === 1 ? "" : "s"}
+                </span>
+              )}
             </div>
 
             {steps.length === 0 && (
@@ -858,6 +997,10 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
                     key={s.id}
                     draggable
                     onDragStart={(e) => {
+                      // Dragging a step that is part of the selection carries the whole block;
+                      // dragging one outside it means the selection was not what you meant, so
+                      // it is dropped rather than moved with you.
+                      if (!stepSelection.has(s.id)) setStepSelection(new Set());
                       dragIdRef.current = s.id;
                       setDragId(s.id);
                       e.dataTransfer.effectAllowed = "move";
@@ -868,13 +1011,19 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
                       if (!dragIdRef.current) return;
                       e.preventDefault();
                       e.dataTransfer.dropEffect = "move";
+                      autoScroll(e.clientY);
                       if (overIndex !== i) setOverIndex(i);
                     }}
                     onDrop={(e) => {
                       e.preventDefault();
                       const held = dragIdRef.current;
                       dragIdRef.current = null;
-                      if (held) moveTo(held, i);
+                      if (held) {
+                        const block = stepSelection.has(held) && stepSelection.size > 1
+                          ? [...stepSelection] : null;
+                        if (block) moveMany(block, i);
+                        else moveTo(held, i);
+                      }
                       setDragId(null);
                       setOverIndex(null);
                     }}
@@ -883,14 +1032,39 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
                       setDragId(null);
                       setOverIndex(null);
                     }}
-                    onClick={() => { setSelectedStep(s.id); setMode("review"); setCursor(i); }}
+                    onClick={(e) => {
+                      if (e.shiftKey && selectedStep) {
+                        // A RUN, anchored on whatever was last selected — the natural way to say
+                        // "48 through 54".
+                        const a = steps.findIndex((x) => x.id === selectedStep);
+                        if (a >= 0) {
+                          const [lo, hi] = a < i ? [a, i] : [i, a];
+                          setStepSelection(new Set(steps.slice(lo, hi + 1).map((x) => x.id)));
+                          return;                    // keep the anchor, so the run can be adjusted
+                        }
+                      }
+                      if (e.ctrlKey || e.metaKey) {
+                        setStepSelection((prev) => {
+                          const next = new Set(prev);
+                          next.has(s.id) ? next.delete(s.id) : next.add(s.id);
+                          return next;
+                        });
+                        setSelectedStep(s.id);
+                        return;
+                      }
+                      setStepSelection(new Set());
+                      setSelectedStep(s.id); setMode("review"); setCursor(i);
+                    }}
                     className={`cursor-pointer px-3 py-2 transition ${
                       dragId === s.id ? "opacity-40" : ""
                     } ${
                       overIndex === i && dragId && dragId !== s.id
                         ? "border-t-2 border-orange-500" : ""
                     } ${
-                      isNow ? "bg-orange-50" : selectedStep === s.id ? "bg-slate-50" : "hover:bg-slate-50"
+                      stepSelection.has(s.id)
+                        ? "bg-sky-100 ring-1 ring-inset ring-sky-300"
+                        : isNow ? "bg-orange-50"
+                        : selectedStep === s.id ? "bg-slate-50" : "hover:bg-slate-50"
                     }`}
                   >
                     <div className="flex items-start gap-2">
@@ -1015,7 +1189,7 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
             <div className="flex min-h-[12rem] flex-1 flex-col overflow-hidden rounded-lg border border-amber-300 bg-amber-50">
               <div className="flex items-center justify-between border-b border-amber-200 px-3 py-1.5">
                 <span className="text-xs font-semibold uppercase tracking-wide text-amber-900">
-                  Out of scope ({suppressed.length}) · {Math.round(suppressedMass).toLocaleString("en-GB")} kg
+                  Out of scope ({suppressed.length} in {suppressedGroups.length} section{suppressedGroups.length === 1 ? "" : "s"}) · {Math.round(suppressedMass).toLocaleString("en-GB")} kg
                 </span>
                 {suppressed.length > 0 && (
                   <button
@@ -1032,21 +1206,52 @@ export function ErectionPlanner({ modelId, projectRef, modelName }: {
                 </p>
               )}
               <ul className="min-h-0 flex-1 space-y-0.5 overflow-auto px-3 py-1.5">
-                {suppressed.map((u) => (
-                  <li key={u.unit_path} className="flex items-center gap-2 text-xs">
-                    <span className="min-w-0 flex-1 truncate text-amber-900" title={u.unit_path}>
-                      {u.name}
-                    </span>
-                    <span className="shrink-0 tabular-nums text-amber-700">
-                      {u.part_count}p · {Math.round(u.mass_kg).toLocaleString("en-GB")} kg
-                    </span>
-                    <button
-                      onClick={() => setScope([u.unit_path], false)}
-                      disabled={!!busy}
-                      className="shrink-0 rounded border border-amber-400 px-1.5 py-0.5 text-[10px] leading-none text-amber-900 hover:bg-white disabled:opacity-40"
-                    >Restore</button>
-                  </li>
-                ))}
+                {suppressedGroups.map((g) => {
+                  const open = openScopeGroup === g.key;
+                  return (
+                    <li key={g.key} className="text-xs">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setOpenScopeGroup(open ? null : g.key)}
+                          className="flex min-w-0 flex-1 items-center gap-1 text-left hover:underline"
+                          title={open ? "Collapse" : "Show the individual pieces"}
+                        >
+                          <span className="shrink-0 text-amber-600">{open ? "▾" : "▸"}</span>
+                          <span className="truncate font-medium text-amber-900">{g.key}</span>
+                          <span className="shrink-0 font-normal text-amber-700">× {g.units.length}</span>
+                        </button>
+                        <span className="shrink-0 tabular-nums text-amber-700">
+                          {g.parts}p · {Math.round(g.mass).toLocaleString("en-GB")} kg
+                        </span>
+                        <button
+                          onClick={() => setScope(g.units.map((u) => u.unit_path), false)}
+                          disabled={!!busy}
+                          title={`Bring all ${g.units.length} back into the job`}
+                          className="shrink-0 rounded border border-amber-400 px-1.5 py-0.5 text-[10px] leading-none text-amber-900 hover:bg-white disabled:opacity-40"
+                        >Restore all</button>
+                      </div>
+                      {open && (
+                        <ul className="mt-0.5 max-h-48 space-y-0.5 overflow-auto border-l border-amber-300 pl-2">
+                          {g.units.map((u) => (
+                            <li key={u.unit_path} className="flex items-center gap-2">
+                              <span className="min-w-0 flex-1 truncate text-amber-900" title={u.unit_path}>
+                                {u.name}
+                              </span>
+                              <span className="shrink-0 tabular-nums text-amber-700">
+                                {u.part_count}p · {Math.round(u.mass_kg).toLocaleString("en-GB")} kg
+                              </span>
+                              <button
+                                onClick={() => setScope([u.unit_path], false)}
+                                disabled={!!busy}
+                                className="shrink-0 rounded border border-amber-400 px-1.5 py-0.5 text-[10px] leading-none text-amber-900 hover:bg-white disabled:opacity-40"
+                              >Restore</button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}
