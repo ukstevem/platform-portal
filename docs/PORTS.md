@@ -53,7 +53,22 @@ networks:
 | 3017 | `purchase-order`   | Purchase Orders     | `/purchase-order/` | Pi (.75) | `pss-purchase-order/app/` (standalone) |
 | 3018 | `wiki`             | PSS Wiki (BookStack)| `/wiki/`        | Pi (.75) | `pss-data-wiki/` (standalone)        |
 | 3019 | `admin-ui`         | Estate Health       | `/admin/`       | Pi (.75) | `pss-admin-ui/app/` (standalone)     |
-| 3020 | *reserved*         | next standalone     | —               | —        | —                                    |
+| 3020 | `employee-review`  | Employee Review     | `/employee-review/` | Pi (.75) | `pss-employee-review/app/` (standalone) |
+| 3021 | *reserved*         | next standalone     | —               | —        | —                                    |
+
+> **Dev ports are the production port plus 100.** `employee-review` binds 3020 in
+> production and **3120** for local `next dev`, so a dev server can never be mistaken for,
+> or collide with, the deployed app. Introduced 2026-09-09 with `employee-review`, which is
+> currently the only app following it — `employee-presence` and the rest still use the same
+> number for both. Adopt it for new apps; retrofitting the others is not urgent. The 31xx
+> band is a convention only: nothing binds it on the Pi and it is not routed by the gateway.
+
+> **`employee-review` is claimed but not yet deployed.** The row above records the claim so
+> 3020 cannot be handed to a second app while the repo is still being built. As of
+> 2026-09-09 nothing binds 3020 and `production.conf` has no `location /employee-review/`
+> block, so the registry will report `PORT-NO-ROUTE` — correctly, and the same way it does
+> for `wiki`. The nginx route goes in when the app first deploys, not before: a route to a
+> port nothing is listening on just returns 502.
 
 > **`wiki` has no nginx route yet.** It binds 3018 and its compose cites `/wiki/`, but
 > `production.conf` has no `location /wiki/` block, so it is unreachable through the gateway.
