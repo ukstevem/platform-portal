@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@platform/auth": "workspace:*",
+    "@platform/bradford": "workspace:*",
     "@platform/supabase": "workspace:*",
     "@platform/ui": "workspace:*",
     "jspdf": "^4.2.1",

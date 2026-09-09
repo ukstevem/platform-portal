@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@platform/supabase";
 import { toISO, getWeekDates } from "@/lib/weekHelpers";
-import { calculateBradford, BRADFORD_THRESHOLDS, type BradfordResult } from "@/lib/bradford";
+import { calculateBradford, BRADFORD_THRESHOLDS, type BradfordResult } from "@platform/bradford";
 import type { Employee } from "@/lib/types";
 
 type EmployeeStatus = Employee & {

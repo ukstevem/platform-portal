@@ -4,7 +4,7 @@ const nextConfig: NextConfig = {
   basePath: "/timesheets",
   trailingSlash: true,
   typescript: { ignoreBuildErrors: true },
-  transpilePackages: ["@platform/supabase", "@platform/auth", "@platform/ui"],
+  transpilePackages: ["@platform/supabase", "@platform/auth", "@platform/ui", "@platform/bradford"],
 };
 
 export default nextConfig;

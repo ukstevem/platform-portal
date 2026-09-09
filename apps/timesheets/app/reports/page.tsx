@@ -6,7 +6,7 @@ import { supabase } from "@platform/supabase";
 import { useAuth } from "@platform/auth/AuthProvider";
 import { AuthButton } from "@platform/auth/AuthButton";
 import { getMonday, toISO, formatWeekRange, getWeekDates, DAY_LABELS } from "@/lib/weekHelpers";
-import { calculateBradford, BRADFORD_THRESHOLDS, BRADFORD_WINDOW_WEEKS, type BradfordResult } from "@/lib/bradford";
+import { calculateBradford, BRADFORD_THRESHOLDS, BRADFORD_WINDOW_WEEKS, type BradfordResult } from "@platform/bradford";
 import XLSX from "xlsx-js-style";
 
 type RawEntry = {
