@@ -15,10 +15,24 @@ import { NextRequest, NextResponse } from "next/server";
 const CAD_SERVICE_URL =
   process.env.CAD_SERVICE_URL ?? "http://host.docker.internal:8001";
 
+// Response headers the service sets that the browser needs to see. Dropping them cost more than
+// it looks (bd jj0p): without Cache-Control every part picture was fetched again on every
+// expand and reload, and without ETag the viewer's mesh revalidation never matched, so each
+// look re-sent the whole mesh.
+const PASS_BACK = ["content-disposition", "cache-control", "etag", "x-cut-file-count"];
+
+// Statuses that must not carry a body. `new Response(body, {status: 204})` THROWS even for an
+// empty body - so a node with nothing to draw (204) came back from here as a 502.
+const NULL_BODY = new Set([101, 204, 205, 304]);
+
 async function forward(req: NextRequest, path: string[]) {
   const search = req.nextUrl.search ?? "";
   const url = `${CAD_SERVICE_URL}/api/v1/${path.join("/")}${search}`;
   const init: RequestInit = { method: req.method, cache: "no-store" };
+  if (req.method === "GET") {
+    const inm = req.headers.get("if-none-match");
+    if (inm) init.headers = { "If-None-Match": inm };
+  }
   if (req.method !== "GET" && req.method !== "HEAD") {
     const contentType = req.headers.get("content-type") ?? "";
     if (contentType.startsWith("multipart/form-data")) {
@@ -35,16 +49,20 @@ async function forward(req: NextRequest, path: string[]) {
   }
   try {
     const res = await fetch(url, init);
-    const body = await res.arrayBuffer();
     const headers: Record<string, string> = {
       "Content-Type": res.headers.get("content-type") ?? "application/json",
     };
-    // Carry the download filename through. Without it the browser saves every cut file as
-    // the route name - "nc1" - and a folder of identically-named downloads is useless to
-    // whoever takes them to a machine.
-    const cd = res.headers.get("content-disposition");
-    if (cd) headers["Content-Disposition"] = cd;
-    return new NextResponse(body, { status: res.status, headers });
+    // Content-Disposition carries the download filename. Without it the browser saves every
+    // cut file as the route name - "nc1" - and a folder of identically-named downloads is
+    // useless to whoever takes them to a machine.
+    for (const h of PASS_BACK) {
+      const v = res.headers.get(h);
+      if (v) headers[h] = v;
+    }
+    if (NULL_BODY.has(res.status)) {
+      return new NextResponse(null, { status: res.status, headers });
+    }
+    return new NextResponse(await res.arrayBuffer(), { status: res.status, headers });
   } catch (err) {
     console.error("cad-review proxy failed:", url, err);
     return NextResponse.json(

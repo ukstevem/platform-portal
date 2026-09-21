@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { PreparePicturesBar } from "./PreparePictures";
+import { Thumb } from "./Thumb";
 
 /**
  * The bill of materials: every line with a picture, a size, a box and a weight (bd 3ytz).
@@ -59,18 +61,29 @@ export function BomTable({ modelId, projectRef }: {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showPics, setShowPics] = useState(true);
+  // A picture the service has not prepared answers "not ready" rather than read the model file
+  // (bd jj0p); the page then offers to prepare them, and remounts every picture once done.
+  const [picsMissing, setPicsMissing] = useState(false);
+  const [picsVersion, setPicsVersion] = useState(0);
+  const onPicsMissing = useCallback(() => setPicsMissing(true), []);
 
-  const load = useCallback(async () => {
-    setErr(null);
-    try {
-      const res = await fetch(`/cad-review/api/cad/models/${modelId}/bom/`,
-                              { cache: "no-store" });
-      if (!res.ok) { setErr(`BOM returned ${res.status}`); return; }
-      setRows(await res.json());
-    } catch { setErr("Could not reach the CAD service"); }
+  useEffect(() => {
+    // `live` so a slow answer for the model you just left cannot land on the one you opened.
+    let live = true;
+    (async () => {
+      try {
+        const res = await fetch(`/cad-review/api/cad/models/${modelId}/bom/`,
+                                { cache: "no-store" });
+        if (!live) return;
+        if (!res.ok) { setErr(`BOM returned ${res.status}`); return; }
+        const body = await res.json();
+        if (!live) return;
+        setErr(null);
+        setRows(body);
+      } catch { if (live) setErr("Could not reach the CAD service"); }
+    })();
+    return () => { live = false; };
   }, [modelId]);
-
-  useEffect(() => { load(); }, [load]);
 
   const { make, free, other, totals } = useMemo(() => {
     const all = rows ?? [];
@@ -168,23 +181,34 @@ export function BomTable({ modelId, projectRef }: {
         </p>
       )}
 
-      <Section title="What we make" rows={make} showPics={showPics} modelId={modelId} />
+      {showPics && picsMissing && (
+        <PreparePicturesBar modelId={modelId} onDone={() => {
+          setPicsMissing(false);
+          setPicsVersion((v) => v + 1);
+        }} />
+      )}
+
+      <Section title="What we make" rows={make} modelId={modelId}
+               pics={showPics ? { version: picsVersion, onMissing: onPicsMissing } : null} />
       {free.length > 0 && (
-        <Section title="Free issue — supplied by the client" rows={free} showPics={showPics}
-                 modelId={modelId} muted />
+        <Section title="Free issue — supplied by the client" rows={free} modelId={modelId} muted
+                 pics={showPics ? { version: picsVersion, onMissing: onPicsMissing } : null} />
       )}
       {other.length > 0 && (
-        <Section title="Bought or excluded" rows={other} showPics={showPics} modelId={modelId}
-                 muted />
+        <Section title="Bought or excluded" rows={other} modelId={modelId} muted
+                 pics={showPics ? { version: picsVersion, onMissing: onPicsMissing } : null} />
       )}
     </div>
   );
 }
 
-function Section({ title, rows, showPics, modelId, muted }: {
-  title: string; rows: Row[]; showPics: boolean; modelId: string; muted?: boolean;
+type Pics = { version: number; onMissing: () => void } | null;
+
+function Section({ title, rows, pics, modelId, muted }: {
+  title: string; rows: Row[]; pics: Pics; modelId: string; muted?: boolean;
 }) {
   if (rows.length === 0) return null;
+  const showPics = pics !== null;
   const pieces = rows.reduce((n, r) => n + (r.qty ?? 0), 0);
   const kg = rows.reduce((n, r) => n + (r.line_mass_kg ?? 0), 0);
   return (
@@ -218,10 +242,11 @@ function Section({ title, rows, showPics, modelId, muted }: {
                 <tr key={r.fingerprint_key} className="hover:bg-slate-50">
                   {showPics && (
                     <td className="px-3 py-1.5">
-                      {/* Lazy, because a job is sixty of these and only a few are on screen. */}
-                      <img loading="lazy" alt={r.name ?? ""}
-                           src={`/cad-review/api/cad/models/${modelId}/prototype/${r.fingerprint_key}/thumbnail/`}
-                           className="h-[58px] w-[86px] rounded bg-slate-100 object-contain" />
+                      {/* Queued and near-screen only: a job is sixty of these and only a few
+                          are on screen (see Thumb). */}
+                      <Thumb key={pics!.version} onNotReady={pics!.onMissing}
+                             src={`/cad-review/api/cad/models/${modelId}/prototype/${r.fingerprint_key}/thumbnail/`}
+                             className="h-[58px] w-[86px]" />
                     </td>
                   )}
                   <td className="px-3 py-1.5 font-mono text-xs">{r.mark || "—"}</td>

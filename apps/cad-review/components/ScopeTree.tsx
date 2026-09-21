@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { AssemblyViewer } from "./AssemblyViewer";
 import { PartViewer } from "./PartViewer";
+import { PreparePicturesBar } from "./PreparePictures";
+import { Thumb } from "./Thumb";
 
 /**
  * Tag the model top-down: Bought out, or Manufactured and open it up (Steve, 2026-09-21).
@@ -89,6 +91,12 @@ export function ScopeTree({ modelId, onChanged }: {
   const [busy, setBusy] = useState<string | null>(null);
   const [pending, setPending] = useState(0);
   const [applying, setApplying] = useState<string | null>(null);
+  // Pictures the service has not prepared (bd jj0p). It will not parse a model's file just to
+  // draw one - on job 10335 that stalled everything for four minutes - so a model ingested
+  // before pictures were prepared at ingest says "not ready" until someone asks for them.
+  const [picsMissing, setPicsMissing] = useState(false);
+  const [picsVersion, setPicsVersion] = useState(0);
+  const onPicsMissing = useCallback(() => setPicsMissing(true), []);
 
   const api = `/cad-review/api/cad/models/${modelId}`;
 
@@ -226,7 +234,8 @@ export function ScopeTree({ modelId, onChanged }: {
   if (!root) return err ? <Warn>{err}</Warn>
                         : <p className="text-sm text-slate-500">Reading the assembly tree…</p>;
 
-  const shared = { kids, groups, open, loading, sel, busy, setSel, toggle, tag, tagGroup, modelId };
+  const shared = { kids, groups, open, loading, sel, busy, setSel, toggle, tag, tagGroup, modelId,
+                   picsVersion, onPicsMissing };
 
   return (
     <div className="space-y-3">
@@ -260,6 +269,13 @@ export function ScopeTree({ modelId, onChanged }: {
       </div>
 
       {err && <Warn>{err}</Warn>}
+
+      {picsMissing && (
+        <PreparePicturesBar modelId={modelId} onDone={() => {
+          setPicsMissing(false);
+          setPicsVersion((v) => v + 1);         // remount every picture, so each asks again
+        }} />
+      )}
 
       <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_24rem]">
         <div className="self-start rounded-lg border border-slate-200 bg-white">
@@ -299,6 +315,8 @@ type Shared = {
   tag: (n: Node, t: Tag) => void;
   tagGroup: (partKey: string, g: Group, t: Tag) => void;
   modelId: string;
+  picsVersion: number;
+  onPicsMissing: () => void;
 };
 
 function Row({ n, depth, ...s }: { n: Node; depth: number } & Shared) {
@@ -335,11 +353,12 @@ function Row({ n, depth, ...s }: { n: Node; depth: number } & Shared) {
           </button>
         ) : <span className="h-8 w-8 shrink-0" />}
 
-        {depth === 0 && (
-          <img loading="lazy" alt=""
-               src={`/cad-review/api/cad/models/${s.modelId}/node-thumbnail/?prefix=${encodeURIComponent(n.instance_prefix)}`}
-               className="h-[52px] w-[76px] shrink-0 rounded bg-slate-100 object-contain" />
-        )}
+        {/* Every level, not just the top: a name deep in a client model means no more than
+            one at the top does (bd jj0p). */}
+        <Thumb key={s.picsVersion} onNotReady={s.onPicsMissing}
+               src={`/cad-review/api/cad/models/${s.modelId}/node-thumbnail/?prefix=${
+                  encodeURIComponent(n.instance_prefix)}`}
+               className={depth === 0 ? "h-[52px] w-[76px]" : "h-[44px] w-[64px]"} />
 
         <div className="min-w-0 flex-1">
           <span className="text-sm font-medium">
@@ -411,9 +430,9 @@ function GroupRow({ g, partKey, depth, ...s }:
                : "border-l-transparent hover:border-l-slate-300 hover:bg-slate-50"}`}>
         <span className="h-8 w-8 shrink-0" />
         {g.rep ? (
-          <img loading="lazy" alt=""
-               src={`/cad-review/api/cad/models/${s.modelId}/prototype/${g.rep}/thumbnail/`}
-               className="h-[44px] w-[64px] shrink-0 rounded bg-slate-100 object-contain" />
+          <Thumb key={s.picsVersion} onNotReady={s.onPicsMissing}
+                 src={`/cad-review/api/cad/models/${s.modelId}/prototype/${g.rep}/thumbnail/`}
+                 className="h-[44px] w-[64px]" />
         ) : <span className="h-[44px] w-[64px] shrink-0 rounded bg-slate-100" />}
 
         <div className="min-w-0 flex-1">
