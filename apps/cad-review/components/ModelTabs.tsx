@@ -6,6 +6,7 @@ import { PartsList } from "./PartsList";
 import { ScopeCandidates } from "./ScopeCandidates";
 import { ScopeTree } from "./ScopeTree";
 import { StockNesting } from "./StockNesting";
+import { BomTable } from "./BomTable";
 
 /**
  * Two questions, two views. "What still needs me?" (review) and "what did we make, and give
@@ -16,7 +17,7 @@ export function ModelTabs({ modelId, projectRef }: {
   modelId: string; projectRef?: string | null;
 }) {
   const [tab, setTab] = useState<
-    "tree" | "scope" | "review" | "parts" | "nest">("tree");
+    "tree" | "scope" | "review" | "parts" | "bom" | "nest">("tree");
   // Bump to force the sibling views to refetch after a scope decision changes
   // what is billable underneath them.
   const [gen, setGen] = useState(0);
@@ -26,6 +27,7 @@ export function ModelTabs({ modelId, projectRef }: {
       <div className="flex gap-1 border-b border-slate-200">
         {([["tree", "Scope the model"], ["scope", "Possible bought-outs"],
           ["review", "Review"], ["parts", "Parts & cut files"],
+          ["bom", "Bill of materials"],
           ["nest", "Stock & nesting"]] as const).map(([k, label]) => (
           <button
             key={k}
@@ -53,6 +55,11 @@ export function ModelTabs({ modelId, projectRef }: {
       {tab === "parts" && <PartsList key={`p${gen}`} modelId={modelId} />}
       {/* Last in the strip because it is last in the job: nothing should be nested until the
           scope is settled and the lengths are verified. */}
+      {/* Between the cut files and the nest: it is the whole job in one table, and the place
+          someone checks a part against a drawing before anything is cut. */}
+      {tab === "bom" && (
+        <BomTable key={`b${gen}`} modelId={modelId} projectRef={projectRef} />
+      )}
       {tab === "nest" && (
         <StockNesting key={`n${gen}`} modelId={modelId} projectRef={projectRef} />
       )}

@@ -88,12 +88,23 @@ export function PartsList({ modelId }: { modelId: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm">
-        <span className="text-2xl font-semibold tabular-nums">{t.designations}</span>
-        <span className="ml-2 text-slate-600">designations</span>
-        <span className="ml-4 text-slate-500">
-          {t.parts} parts · {t.pieces} pieces · {t.with_cut_file} with a cut file
-        </span>
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm">
+        <div>
+          <span className="text-2xl font-semibold tabular-nums">{t.designations}</span>
+          <span className="ml-2 text-slate-600">designations</span>
+          <span className="ml-4 text-slate-500">
+            {t.parts} parts · {t.pieces} pieces · {t.with_cut_file} with a cut file
+          </span>
+        </div>
+        {/* One zip instead of sixty clicks (bd 3ytz). Produce writes to a blob store keyed by
+            model uuid and nothing copied it anywhere a person would look — which is how a job
+            folder came to be six days stale while the current files sat under a uuid. */}
+        {t.with_cut_file > 0 && (
+          <a href={`/cad-review/api/cad/models/${modelId}/cut-files.zip`}
+             className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white">
+            Download all {t.with_cut_file} cut files
+          </a>
+        )}
       </div>
 
       <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_24rem]">

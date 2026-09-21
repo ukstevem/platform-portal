@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ModelTabs } from "@/components/ModelTabs";
+import { GradeField } from "@/components/GradeField";
 
 export const dynamic = "force-dynamic";
 
@@ -31,11 +32,14 @@ export default async function ModelReviewPage({
         ← all models
       </Link>
 
-      <div className="mt-2 mb-6">
+      <div className="mt-2 mb-6 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold">
           {m?.project_ref ?? "Review"}
           {m?.name && <span className="ml-3 text-base font-normal text-slate-500">{m.name}</span>}
         </h1>
+        {/* Beside the job number, because it belongs to the job and is stamped into every
+            cut file — not buried in a settings pane nobody opens. */}
+        <GradeField modelId={model} current={m?.material_grade ?? null} />
       </div>
 
       <ModelTabs modelId={model} projectRef={m?.project_ref ?? null} />

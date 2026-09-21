@@ -20,6 +20,10 @@ export function UploadModel() {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
   const [project, setProject] = useState("");
+  // Asked for AT THE DOOR because it is stamped into every NC1 header. Set afterwards, every
+  // cut file is written twice - on job 10335 that is 870 NC1 and 702 DXF.
+  const [grade, setGrade] = useState("S355");
+  const [sizeMb, setSizeMb] = useState(0);
   const [phase, setPhase] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -32,13 +36,18 @@ export function UploadModel() {
     setDup(null);
     const file = fileRef.current?.files?.[0];
     if (!file) { setErr("Choose a STEP file."); return; }
+    setSizeMb(Math.round(file.size / 1_048_576));
     if (!project.trim()) { setErr("A project number is required — it is stamped into every NC1 header and every piece mark."); return; }
 
-    setErr(null); setBusy(true); setPhase("Uploading…");
+    setErr(null); setBusy(true);
+    setPhase(file.size > 100 * 1_048_576
+      ? `Uploading ${Math.round(file.size / 1_048_576)} MB…`
+      : "Uploading…");
     try {
       const body = new FormData();
       body.append("file", file);
       body.append("project_number", project.trim());
+      body.append("material_grade", grade.trim().toUpperCase());
       const res = await fetch(
         `/cad-review/api/cad/models/?identify=true&produce=true${
           allowDuplicate ? "&allow_duplicate=true" : ""}`,
@@ -51,6 +60,13 @@ export function UploadModel() {
         if (res.status === 409 && detail && typeof detail === "object"
             && (detail as Dup).reason === "duplicate_file") {
           setDup(detail as Dup);
+          return;
+        }
+        // A 413 comes from the gateway as HTML, so there is no JSON detail to show and the bare
+        // status meant nothing to anyone - it is what a 722 MB file got until 2026-09-21.
+        if (res.status === 413) {
+          setErr(`This file (${sizeMb.toLocaleString()} MB) is larger than the gateway accepts. ` +
+                 "Ask for the upload limit to be raised; the file itself is fine.");
           return;
         }
         const msg = typeof detail === "string" ? detail : JSON.stringify(detail);
@@ -93,6 +109,15 @@ export function UploadModel() {
           <input value={project} onChange={(e) => setProject(e.target.value)}
                  placeholder="10353" disabled={busy}
                  className="w-32 rounded border border-slate-300 px-2 py-1 text-sm disabled:opacity-40" />
+        </label>
+        <label className="text-xs text-slate-600">
+          <span className="block mb-1">Grade</span>
+          <input value={grade} onChange={(e) => setGrade(e.target.value.toUpperCase())}
+                 list="upload-grades" disabled={busy}
+                 className="w-24 rounded border border-slate-300 px-2 py-1 font-mono text-sm disabled:opacity-40" />
+          <datalist id="upload-grades">
+            <option value="S275" /><option value="S355" /><option value="S460" />
+          </datalist>
         </label>
         <button type="submit" disabled={busy}
                 className="rounded bg-slate-900 px-4 py-1.5 text-sm text-white disabled:opacity-40">
@@ -161,7 +186,10 @@ function fmt(iso: string | null) {
 
 /** Poll the ingest job, reporting phases, and return the model id. */
 async function waitForIngest(jobId: string, phase: (s: string) => void,
-                             tries = 240): Promise<string | null> {
+                             // 60 minutes. A 722 MB ingest ran well past the old 10-minute
+                             // limit, and giving up early left the form saying "still running"
+                             // over a job that was fine.
+                             tries = 1440): Promise<string | null> {
   for (let i = 0; i < tries; i++) {
     await new Promise((r) => setTimeout(r, 2500));
     try {

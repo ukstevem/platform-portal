@@ -60,7 +60,7 @@ const KIND_BLURB: Record<Kind, string> = {
 };
 
 const TYPES = ["SECTION", "PLATE", "TUBE", "PIPE", "RAIL", "FORMED_PLATE",
-               "BOUGHT_OUT", "PROPRIETARY", "ASSEMBLY_UNIT", "EXCLUDE"];
+               "BOUGHT_OUT", "FREE_ISSUE", "PROPRIETARY", "ASSEMBLY_UNIT", "EXCLUDE"];
 
 export function ReviewQueue({ modelId }: { modelId: string }) {
   const [q, setQ] = useState<Queue | null>(null);

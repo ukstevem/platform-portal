@@ -90,13 +90,18 @@ export function AssemblyViewer({ modelId, prefix, className }: {
     // times, so fetching per instance would be fifteen times the work for the same picture.
     const keys = Array.from(new Set(instances.map((i) => i.prototype_key)));
     const geo = new Map<string, { v: number[]; f: number[] }[]>();
-    for (const k of keys) {
+    // IN PARALLEL, AND AT OVERVIEW DETAIL. This fetched one prototype at a time at REVIEW_LOD —
+    // 0.1 mm deflection, measurement grade — to draw a whole assembly on a screen. That was the
+    // wait Steve hit clicking through 10335's top level. lod=8 matches the node thumbnails, so a
+    // node that has been pictured is already meshed and opens from cache.
+    await Promise.all(keys.map(async (k) => {
       try {
-        const m = await fetch(`/cad-review/api/cad/models/${modelId}/prototype/${k}/mesh/`,
-                              { cache: "no-store" });
+        const m = await fetch(
+          `/cad-review/api/cad/models/${modelId}/prototype/${k}/mesh/?lod=8`,
+          { cache: "no-store" });
         if (m.ok) geo.set(k, (await m.json()).bodies ?? []);
       } catch { /* one unmeshable body must not lose the whole view */ }
-    }
+    }));
 
     let placed = 0;
     instances.forEach((inst) => {
