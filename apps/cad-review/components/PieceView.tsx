@@ -2,9 +2,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
-import { PreparePicturesBar } from "./PreparePictures";
-import { Thumb } from "./Thumb";
+import { useEffect, useState } from "react";
+import { PieceEditor } from "./PieceEditor";
 
 /**
  * One kind of piece, opened up so it can be refined (bd kl1y.6).
@@ -52,9 +51,6 @@ export function PieceView({ modelId, prefix, piece }: {
   const [note, setNote] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
   const [name, setName] = useState("");
-  const [picsMissing, setPicsMissing] = useState(false);
-  const [picsVersion, setPicsVersion] = useState(0);
-  const onPicsMissing = useCallback(() => setPicsMissing(true), []);
 
   const api = `/cad-review/api/cad/models/${modelId}`;
   const qs = `prefix=${encodeURIComponent(prefix)}`;
@@ -160,7 +156,6 @@ export function PieceView({ modelId, prefix, piece }: {
   if (!d) return <p className="mt-4 text-sm text-slate-500">Opening the piece…</p>;
 
   const p = d.piece;
-  const pic = `${api}/isolate/piece-thumbnail/?${qs}&piece=${p.key}`;
 
   return (
     <div className="mt-2 space-y-4">
@@ -168,8 +163,7 @@ export function PieceView({ modelId, prefix, piece }: {
         ← back to the node
       </Link>
 
-      <div className="grid gap-4 md:grid-cols-[18rem_minmax(0,1fr)]">
-        <Thumb key={picsVersion} src={pic} onNotReady={onPicsMissing} className="h-[13rem] w-full" />
+      <div>
         <div className="space-y-2">
           <h1 className="text-2xl font-semibold">{d.accepted?.name || p.label}</h1>
           <p className="text-sm text-slate-600">
@@ -178,8 +172,8 @@ export function PieceView({ modelId, prefix, piece }: {
             {p.bolted_to > 0 && ` · bolted to ${p.bolted_to} other piece${p.bolted_to === 1 ? "" : "s"}`}
           </p>
           <p className="text-xs text-slate-500">
-            Every change here is a rule about a <em>kind</em> of part, so it applies to all {p.qty}{" "}
-            of these at once — and you see what it does before it is saved.
+            Edits in the model below apply to this piece. The rules further down are about a{" "}
+            <em>kind</em> of part and apply to all {p.qty} of these at once.
           </p>
           {d.accepted_key && (
             <div className="flex items-center gap-2">
@@ -195,15 +189,19 @@ export function PieceView({ modelId, prefix, piece }: {
         </div>
       </div>
 
-      {picsMissing && (
-        <PreparePicturesBar modelId={modelId} onDone={() => {
-          setPicsMissing(false); setPicsVersion((v) => v + 1);
-        }} />
-      )}
+      <PieceEditor modelId={modelId} prefix={prefix} piece={piece}
+                   onSaved={(k) => router.push(k ? `/${modelId}/isolate/?${qs}&piece=${k}`
+                                                 : nodeHref)} />
+
       {err && <Warn>{err}</Warn>}
       {note && <p className="text-sm text-slate-600">{note}</p>}
       {busy && <p className="text-sm text-slate-500">{busy}</p>}
 
+      <details className="rounded-lg border border-slate-200 bg-white px-4 py-2">
+        <summary className="cursor-pointer text-sm font-medium text-slate-700">
+          Rules for every piece like this — by kind of part
+        </summary>
+        <div className="mt-3 space-y-4">
       {preview && (
         <div className="space-y-2 rounded-lg border-2 border-slate-900 bg-white p-4">
           <div className="text-sm font-semibold">{describe(preview.trial, d)}</div>
@@ -302,6 +300,8 @@ export function PieceView({ modelId, prefix, piece }: {
                    : null} />
         ))}
       </Section>
+        </div>
+      </details>
     </div>
   );
 }

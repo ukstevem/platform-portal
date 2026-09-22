@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { bodyObject } from "./cadMesh";
 
 /**
  * Draw everything under one instance path, each prototype a distinct colour.
@@ -81,8 +82,10 @@ export function AssemblyViewer({ modelId, prefix, className }: {
       ctrl = newControls(t);
       ctrlUp = cam.up.clone();
     };
-    scene.add(new THREE.AmbientLight(0xffffff, 0.75));
-    const dl = new THREE.DirectionalLight(0xffffff, 0.7);
+    // three 0.155+ light units are physical: Lambert divides by pi, so the old 0.75 ambient
+    // came out near 0.24 and the steel read as dark slate. Scaled by pi to what was meant.
+    scene.add(new THREE.AmbientLight(0xffffff, 0.65 * Math.PI));
+    const dl = new THREE.DirectionalLight(0xffffff, 0.7 * Math.PI);
     dl.position.set(1, 1.3, 1.2); scene.add(dl);
     const root = new THREE.Group(); scene.add(root);
 
@@ -104,19 +107,20 @@ export function AssemblyViewer({ modelId, prefix, className }: {
     }));
 
     let placed = 0;
+    // Feature edges cost a pass over every body; above a few thousand (a whole flattened block)
+    // they would stall the page for a picture nobody reads edges from at that scale.
+    const bodyCount = instances.reduce((n, inst) => n + (geo.get(inst.prototype_key)?.length ?? 0), 0);
+    const edges = bodyCount <= 3000;
     instances.forEach((inst) => {
       const bodies = geo.get(inst.prototype_key);
       if (!bodies?.length) return;
       const colour = COLOURS[keys.indexOf(inst.prototype_key) % COLOURS.length];
       bodies.forEach((b) => {
         if (!b) return;   // index placeholder — bodies[N] is solid N
-        const g = new THREE.BufferGeometry();
-        g.setAttribute("position", new THREE.Float32BufferAttribute(b.v, 3));
-        g.setIndex(b.f); g.computeVertexNormals();
-        const mesh = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: colour }));
+        const { group } = bodyObject(THREE, b, colour, { edges });
         if (inst.world_placement)
-          mesh.applyMatrix4(new THREE.Matrix4().fromArray(inst.world_placement));
-        root.add(mesh); placed++;
+          group.applyMatrix4(new THREE.Matrix4().fromArray(inst.world_placement));
+        root.add(group); placed++;
       });
     });
 

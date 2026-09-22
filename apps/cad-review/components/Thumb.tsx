@@ -27,6 +27,9 @@ import { useEffect, useRef, useState } from "react";
  */
 
 const MAX_LOADING = 2;
+// Bumped when the pictures are drawn differently. They are served as immutable for a year, so
+// without a new address a browser keeps the old drawing: 2 = depth-buffer renderer (kl1y.10).
+const RENDER = 2;
 let active = 0;
 const waiting: Array<() => void> = [];
 
@@ -82,7 +85,8 @@ export function Thumb({ src, className, onNotReady }: {
     let giveBack = () => {};
     giveBack = takeSlot(async () => {
       try {
-        const res = await fetch(src, { signal: ctl.signal });
+        const address = `${src}${src.includes("?") ? "&" : "?"}r=${RENDER}`;
+        const res = await fetch(address, { signal: ctl.signal });
         if (res.status === 200) {
           made = URL.createObjectURL(await res.blob());
           setUrl(made); setState("ok");

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { bodyObject } from "./cadMesh";
 
 /**
  * The part, in 3D.
@@ -87,8 +88,9 @@ export function PartViewer({ modelId, fingerprintKey }: {
       const ctrl = new OrbitControls(cam, renderer.domElement);
       ctrl.enableDamping = true;
 
-      scene.add(new THREE.AmbientLight(0xffffff, 0.75));
-      const dl = new THREE.DirectionalLight(0xffffff, 0.7);
+      // three 0.155+ light units are physical: Lambert divides by pi. Scaled to what was meant.
+      scene.add(new THREE.AmbientLight(0xffffff, 0.65 * Math.PI));
+      const dl = new THREE.DirectionalLight(0xffffff, 0.7 * Math.PI);
       dl.position.set(1, 1.3, 1.2);
       scene.add(dl);
 
@@ -98,13 +100,7 @@ export function PartViewer({ modelId, fingerprintKey }: {
       // A null body is a deliberate index placeholder (bodies[N] is solid N), not an error.
       (data.bodies || []).forEach((b, i) => {
         if (!b) return;
-        const g = new THREE.BufferGeometry();
-        g.setAttribute("position", new THREE.Float32BufferAttribute(b.v, 3));
-        g.setIndex(b.f);
-        g.computeVertexNormals();
-        root.add(new THREE.Mesh(g, new THREE.MeshLambertMaterial({
-          color: BODY_COLOURS[i % BODY_COLOURS.length],
-        })));
+        root.add(bodyObject(THREE, b, BODY_COLOURS[i % BODY_COLOURS.length]).group);
       });
 
       const box = new THREE.Box3().setFromObject(root);
