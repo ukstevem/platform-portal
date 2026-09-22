@@ -19,11 +19,13 @@ async function getModel(id: string) {
 }
 
 export default async function ModelReviewPage({
-  params,
+  params, searchParams,
 }: {
   params: Promise<{ model: string }>;
+  searchParams: Promise<{ tab?: string }>;
 }) {
   const { model } = await params;
+  const { tab } = await searchParams;
   const m = await getModel(model);
 
   return (
@@ -42,7 +44,7 @@ export default async function ModelReviewPage({
         <GradeField modelId={model} current={m?.material_grade ?? null} />
       </div>
 
-      <ModelTabs modelId={model} projectRef={m?.project_ref ?? null} />
+      <ModelTabs modelId={model} projectRef={m?.project_ref ?? null} initialTab={tab} />
     </main>
   );
 }

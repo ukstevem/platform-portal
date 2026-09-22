@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AssemblyViewer } from "./AssemblyViewer";
 import { PreparePicturesBar } from "./PreparePictures";
+import { ScopeBom } from "./ScopeBom";
 import { Thumb } from "./Thumb";
 
 /**
@@ -25,7 +26,8 @@ type Piece = {
   key: string; label: string; qty: number; parts: number;
   mass_kg: number; total_kg: number; mass_complete: boolean;
   weld_count: number; weld_length_mm: number; bolted_to: number; bolts: number;
-  not_fabricated: boolean; supply: "make" | "buy" | "free_issue" | "mixed" | "unknown";
+  not_fabricated: boolean;
+  supply: "make" | "buy" | "free_issue" | "excluded" | "mixed" | "unknown";
   marks: Mark[]; more_marks: number;
 };
 type Scope = {
@@ -46,7 +48,9 @@ type Scope = {
 type Supply = "all" | "make" | "buy" | "mixed";
 const PAGE = 150;
 
-export function Isolation({ modelId, prefix }: { modelId: string; prefix: string }) {
+export function Isolation({ modelId, prefix, view }: {
+  modelId: string; prefix: string; view?: string;
+}) {
   const [scope, setScope] = useState<Scope | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [sel, setSel] = useState<Piece | null>(null);
@@ -58,6 +62,7 @@ export function Isolation({ modelId, prefix }: { modelId: string; prefix: string
   const [picsVersion, setPicsVersion] = useState(0);
   const onPicsMissing = useCallback(() => setPicsMissing(true), []);
   const [reload, setReload] = useState(0);
+  const [tab, setTab] = useState<"pieces" | "bom">(view === "bom" ? "bom" : "pieces");
   const [accepting, setAccepting] = useState(false);
   const [acceptNote, setAcceptNote] = useState<string | null>(null);
 
@@ -210,6 +215,18 @@ export function Isolation({ modelId, prefix }: { modelId: string; prefix: string
         }} />
       )}
 
+      <div className="flex gap-1 border-b border-slate-200">
+        {([["pieces", "Pieces"], ["bom", "Bill of materials"]] as const).map(([k, label]) => (
+          <button key={k} onClick={() => setTab(k)}
+                  className={`-mb-px border-b-2 px-4 py-2 text-sm ${tab === k
+                    ? "border-slate-900 font-medium text-slate-900"
+                    : "border-transparent text-slate-500 hover:text-slate-800"}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "bom" ? <ScopeBom modelId={modelId} prefix={prefix} /> : (
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_26rem]">
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
@@ -276,6 +293,7 @@ export function Isolation({ modelId, prefix }: { modelId: string; prefix: string
             : <AssemblyViewer modelId={modelId} prefix={prefix} className="h-[26rem]" />}
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -368,10 +386,11 @@ function SupplyPill({ s }: { s: Piece["supply"] }) {
   const look: Record<Piece["supply"], string> = {
     make: "bg-sky-100 text-sky-800", buy: "bg-emerald-100 text-emerald-800",
     free_issue: "bg-violet-100 text-violet-800", mixed: "bg-amber-100 text-amber-800",
-    unknown: "bg-slate-100 text-slate-600",
+    excluded: "bg-slate-200 text-slate-600", unknown: "bg-slate-100 text-slate-600",
   };
   const text: Record<Piece["supply"], string> = {
-    make: "made", buy: "bought", free_issue: "free issue", mixed: "mixed", unknown: "unknown",
+    make: "made", buy: "bought", free_issue: "free issue", mixed: "mixed",
+    excluded: "excluded", unknown: "unknown",
   };
   return <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] ${look[s]}`}>{text[s]}</span>;
 }

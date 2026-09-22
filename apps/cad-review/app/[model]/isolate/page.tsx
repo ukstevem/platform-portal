@@ -13,10 +13,10 @@ export default async function IsolatePage({
   params, searchParams,
 }: {
   params: Promise<{ model: string }>;
-  searchParams: Promise<{ prefix?: string; piece?: string }>;
+  searchParams: Promise<{ prefix?: string; piece?: string; view?: string }>;
 }) {
   const { model } = await params;
-  const { prefix, piece } = await searchParams;
+  const { prefix, piece, view } = await searchParams;
 
   return (
     <main className="p-6 max-w-[95rem]">
@@ -25,7 +25,7 @@ export default async function IsolatePage({
       </Link>
       {!prefix ? <p className="mt-4 text-sm text-slate-500">No node chosen.</p>
         : piece ? <PieceView modelId={model} prefix={prefix} piece={piece} />
-        : <Isolation modelId={model} prefix={prefix} />}
+        : <Isolation modelId={model} prefix={prefix} view={view} />}
     </main>
   );
 }

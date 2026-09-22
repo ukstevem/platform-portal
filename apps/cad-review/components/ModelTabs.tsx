@@ -7,17 +7,22 @@ import { ScopeCandidates } from "./ScopeCandidates";
 import { ScopeTree } from "./ScopeTree";
 import { StockNesting } from "./StockNesting";
 import { BomTable } from "./BomTable";
+import { MasterBom } from "./MasterBom";
 
 /**
  * Two questions, two views. "What still needs me?" (review) and "what did we make, and give
  * me the file" (parts). They are different jobs — one is adjudication, the other is
  * collecting output — so mixing them into one table would serve neither.
  */
-export function ModelTabs({ modelId, projectRef }: {
-  modelId: string; projectRef?: string | null;
+type TabKey = "tree" | "scope" | "review" | "parts" | "bom" | "master" | "nest";
+const TABS: TabKey[] = ["tree", "scope", "review", "parts", "bom", "master", "nest"];
+
+export function ModelTabs({ modelId, projectRef, initialTab }: {
+  modelId: string; projectRef?: string | null; initialTab?: string;
 }) {
-  const [tab, setTab] = useState<
-    "tree" | "scope" | "review" | "parts" | "bom" | "nest">("tree");
+  // ?tab= opens a tab directly, so a link can land on the master BOM.
+  const [tab, setTab] = useState<TabKey>(
+    TABS.includes(initialTab as TabKey) ? (initialTab as TabKey) : "tree");
   // Bump to force the sibling views to refetch after a scope decision changes
   // what is billable underneath them.
   const [gen, setGen] = useState(0);
@@ -27,7 +32,7 @@ export function ModelTabs({ modelId, projectRef }: {
       <div className="flex gap-1 border-b border-slate-200">
         {([["tree", "Scope the model"], ["scope", "Possible bought-outs"],
           ["review", "Review"], ["parts", "Parts & cut files"],
-          ["bom", "Bill of materials"],
+          ["bom", "Bill of materials"], ["master", "Master BOM"],
           ["nest", "Stock & nesting"]] as const).map(([k, label]) => (
           <button
             key={k}
@@ -60,6 +65,9 @@ export function ModelTabs({ modelId, projectRef }: {
       {tab === "bom" && (
         <BomTable key={`b${gen}`} modelId={modelId} projectRef={projectRef} />
       )}
+      {/* Assemblies and material from every node marked done while working in isolation, and
+          what is not covered yet (bd kl1y.7). */}
+      {tab === "master" && <MasterBom key={`m${gen}`} modelId={modelId} />}
       {tab === "nest" && (
         <StockNesting key={`n${gen}`} modelId={modelId} projectRef={projectRef} />
       )}
