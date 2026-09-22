@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { AssemblyViewer } from "./AssemblyViewer";
 import { PartViewer } from "./PartViewer";
@@ -379,6 +380,16 @@ function Row({ n, depth, ...s }: { n: Node; depth: number } & Shared) {
         </div>
 
         <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+          {/* Anything with parts inside it can be worked on alone (bd kl1y): the tree gets
+              unwieldy past a level or two, and a flattened export has no levels at all. */}
+          {kind !== "single" && (
+            <Link href={`/${s.modelId}/isolate/?prefix=${encodeURIComponent(n.instance_prefix)}`}
+                  title="Show only this node, with its joints and the pieces it splits into"
+                  className="rounded border border-slate-300 px-2.5 py-1 text-xs text-slate-700
+                             hover:bg-slate-50">
+              Work in isolation
+            </Link>
+          )}
           {options.filter((t) => t !== current).map((t) => (
             <TagButton key={t} t={t} changing={!!current}
                        disabled={working || (kind === "single" ? !n.proto_key
