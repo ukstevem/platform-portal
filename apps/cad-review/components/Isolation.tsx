@@ -37,7 +37,8 @@ type Scope = {
   accepted: number;
   can_accept: boolean;
   joints: { weld: number; bolt: number; contact: number; crossing: number; excluded: number };
-  summary: { piece_types: number; pieces: number; single_part_pieces: number;
+  rules: { id: number; rule: "never_weld" | "site" | "shop"; kind_a: string; kind_b: string }[];
+  summary: { piece_types: number; pieces: number; single_part_pieces: number; largest: number;
              mass_kg: number; mass_complete: boolean };
   pieces: Piece[];
 };
@@ -79,6 +80,14 @@ export function Isolation({ modelId, prefix }: { modelId: string; prefix: string
     })();
     return () => { live = false; };
   }, [api, qs, reload]);
+
+  async function dropRule(id: number) {
+    try {
+      const res = await fetch(`${api}/joint-rules/${id}/`, { method: "DELETE" });
+      if (!res.ok) { setAcceptNote(`removing the rule returned ${res.status}`); return; }
+      setReload((n) => n + 1);
+    } catch { setAcceptNote("Could not reach the CAD service"); }
+  }
 
   async function accept() {
     setAccepting(true); setAcceptNote(null);
@@ -145,6 +154,7 @@ export function Isolation({ modelId, prefix }: { modelId: string; prefix: string
           <Stat label="parts" value={scope.parts.toLocaleString()} />
           <Stat label="pieces" value={`${s.pieces.toLocaleString()}`}
                 note={`${s.piece_types.toLocaleString()} kinds`} />
+          <Stat label="largest piece" value={`${s.largest.toLocaleString()} parts`} />
           <Stat label="mass" value={`${(s.mass_kg / 1000).toFixed(1)} t`}
                 note={s.mass_complete ? undefined : "some unknown"} />
           <Stat label="bolted joints" value={j.bolt.toLocaleString()} />
@@ -154,6 +164,23 @@ export function Isolation({ modelId, prefix }: { modelId: string; prefix: string
       </div>
 
       <Detection scope={scope} />
+
+      {scope.rules.length > 0 && (
+        <div className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs text-slate-600">
+          <div className="mb-1 font-medium text-slate-700">Your joint rules on this model</div>
+          <ul className="space-y-0.5">
+            {scope.rules.map((r) => (
+              <li key={r.id} className="flex items-center gap-2">
+                <span>{r.rule === "never_weld" ? `${kindName(r.kind_a)} is always bolted`
+                  : r.rule === "site" ? `${kindName(r.kind_a)} ↔ ${kindName(r.kind_b)} welds are site welds`
+                  : `${kindName(r.kind_a)} ↔ ${kindName(r.kind_b)} bolts are shop joints`}</span>
+                <button onClick={() => dropRule(r.id)}
+                        className="text-slate-400 hover:text-slate-900 hover:underline">remove</button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {scope.detection && scope.can_accept && (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-300
@@ -244,6 +271,7 @@ export function Isolation({ modelId, prefix }: { modelId: string; prefix: string
 
         <div className="space-y-3 lg:sticky lg:top-4 lg:self-start">
           {sel ? <PieceDetail p={sel} src={pic(sel)} version={picsVersion}
+                              href={`/${modelId}/isolate/?${qs}&piece=${sel.key}`}
                               onNotReady={onPicsMissing} onClose={() => setSel(null)} />
             : <AssemblyViewer modelId={modelId} prefix={prefix} className="h-[26rem]" />}
         </div>
@@ -277,8 +305,15 @@ function Detection({ scope }: { scope: Scope }) {
   );
 }
 
-function PieceDetail({ p, src, version, onNotReady, onClose }: {
-  p: Piece; src: string; version: number; onNotReady: () => void; onClose: () => void;
+function kindName(k: string): string {
+  // A kind is a size where the part has one, else its own prototype key - which means nothing
+  // to a person, so say what it is instead.
+  return /^P[0-9a-f]{8,}$/.test(k) ? `an unsized part (${k.slice(0, 7)})` : k;
+}
+
+function PieceDetail({ p, src, version, href, onNotReady, onClose }: {
+  p: Piece; src: string; version: number; href: string; onNotReady: () => void;
+  onClose: () => void;
 }) {
   return (
     <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-4">
@@ -321,9 +356,10 @@ function PieceDetail({ p, src, version, onNotReady, onClose }: {
       {p.more_marks > 0 && (
         <p className="text-xs text-slate-500">…and {p.more_marks} more kinds of part.</p>
       )}
-      <p className="rounded bg-slate-50 px-3 py-2 text-xs text-slate-500">
-        Next: open this piece in isolation, split it at a joint, or merge it across a bolt.
-      </p>
+      <Link href={href}
+            className="block rounded bg-slate-900 px-3 py-2 text-center text-sm text-white">
+        Open this piece — split it, join it, tag its parts
+      </Link>
     </div>
   );
 }
