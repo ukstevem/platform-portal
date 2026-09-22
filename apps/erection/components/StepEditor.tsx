@@ -4,6 +4,45 @@ import { useEffect, useState } from "react";
 import { DEFAULT_DEPTH, type Step, type Unit } from "./types";
 
 /**
+ * Copy to the clipboard, including over plain http. navigator.clipboard exists only in a
+ * secure context, and the portal is reached as http://<host> on the LAN, so without the
+ * fallback the button would work on localhost and silently do nothing for everyone else.
+ */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch { /* not a secure context — fall through */ }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+/** A piece's IFC line: the detailer's references for its parts, and any part the IFC lacks. */
+function ifcSummary(u: Unit): { text: string; detail: string; gaps: number } | null {
+  if (!u.ifc) return null;
+  const refs = [...new Set(u.ifc.map((x) => x.reference).filter((r): r is string => !!r))];
+  const gaps = u.ifc.filter((x) => !x.global_id).length;
+  const text = [refs.length ? `IFC ${refs.join(", ")}` : "", gaps ? `${gaps} not in IFC` : ""]
+    .filter(Boolean).join(" · ") || "IFC —";
+  const detail = u.ifc.map((x) =>
+    `${x.mark ?? "?"}  ${x.global_id ?? "(no IFC element here)"}${x.reference ? `  ${x.reference}` : ""}` +
+    `${x.twin ? "  (identical twin in place)" : ""}` +
+    `${x.basis === "loose" ? "  (approximate — the IFC's steel differs in volume)" : ""}`).join("\n");
+  return { text, detail, gaps };
+}
+
+/**
  * Everything a step carries beyond "which pieces": the method text, who and what does it,
  * how long, and whether work stops for a sign-off — plus the controls for deciding what
  * actually travels as one lift.
@@ -56,6 +95,22 @@ export function StepEditor({ step, units, operations, onSave, onDelete, canExten
   const incomplete = units.some((u) => !u.mass_complete);
   const heaviest = units.reduce((a, u) => Math.max(a, u.mass_kg), 0);
 
+  // IFC GlobalIds (bd j0g9), where the model has an IFC linked. Copied rather than shown: 22
+  // characters of base-64 per part is not something to read, it is something to paste into an
+  // IFC viewer to find the same steel. The ticked pieces if any, else the whole lift.
+  const ifcLinked = units.some((u) => u.ifc != null);
+  const ifcParts = units.flatMap((u) => u.ifc ?? []);
+  const ifcFound = ifcParts.filter((x) => x.global_id).length;
+  const [copied, setCopied] = useState<string | null>(null);
+  const copyIds = async () => {
+    const from = selected.size ? units.filter((u) => selected.has(u.unit_path)) : units;
+    const ids = [...new Set(from.flatMap((u) => u.ifc ?? []).map((x) => x.global_id)
+      .filter((g): g is string => !!g))];
+    const ok = ids.length > 0 && await copyText(ids.join("\n"));
+    setCopied(ok ? `Copied ${ids.length}` : ids.length ? "Copy failed" : "Nothing to copy");
+    setTimeout(() => setCopied(null), 2500);
+  };
+
   const field = "w-full rounded border border-slate-300 px-2 py-1 text-sm focus:border-slate-500 focus:outline-none";
   const label = "block text-[11px] font-semibold uppercase tracking-wide text-slate-500";
 
@@ -97,6 +152,25 @@ export function StepEditor({ step, units, operations, onSave, onDelete, canExten
               {incomplete && <span className="ml-1 text-amber-700">(part unknown)</span>}
             </span>
           </div>
+
+          {ifcLinked && (
+            <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-500">
+              <span title="Matched to the model's IFC by position and size. The IFC is a reference only.">
+                IFC: {ifcFound.toLocaleString("en-GB")} of {ifcParts.length.toLocaleString("en-GB")} parts linked
+                {ifcFound < ifcParts.length && (
+                  <span className="text-amber-700">
+                    {" "}· {(ifcParts.length - ifcFound).toLocaleString("en-GB")} not in the IFC
+                  </span>
+                )}
+              </span>
+              <button
+                onClick={copyIds}
+                disabled={ifcFound === 0}
+                title="Copy the IFC GlobalIds, one per line — paste them into an IFC viewer to find the same steel"
+                className="ml-auto rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] text-slate-600 hover:bg-slate-50 disabled:opacity-30"
+              >{copied ?? (selected.size ? `Copy IFC ids (${selected.size} ticked)` : "Copy IFC ids")}</button>
+            </div>
+          )}
 
           {/* Authoring a sub-assembly lift. A big assembly opened to its parts is still ONE
               lift until somebody says which parts travel together, and that grouping is
@@ -176,8 +250,19 @@ export function StepEditor({ step, units, operations, onSave, onDelete, canExten
                       className="shrink-0"
                     />
                   )}
-                  <span className="min-w-0 flex-1 truncate text-slate-700" title={u.unit_path}>
-                    {u.name}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-slate-700" title={u.unit_path}>
+                      {u.name}
+                    </span>
+                    {(() => {
+                      const s = ifcSummary(u);
+                      return s && (
+                        <span
+                          className={`block truncate text-[10px] ${s.gaps ? "text-amber-700" : "text-slate-400"}`}
+                          title={s.detail}
+                        >{s.text}</span>
+                      );
+                    })()}
                   </span>
                   <span className="shrink-0 tabular-nums text-slate-500">
                     {u.part_count}p · {Math.round(u.mass_kg).toLocaleString("en-GB")} kg

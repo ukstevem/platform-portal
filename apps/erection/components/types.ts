@@ -28,8 +28,37 @@ export type Unit = {
    * comes apart completely — plates separated from the beams they belong to.
    */
   opens_to?: "assemblies" | "solids" | null;
+  /**
+   * The IFC element each part is, where the model came with an IFC (bd j0g9). null when no IFC
+   * has been linked — which is not the same as "none of these parts are in it".
+   */
+  ifc?: IfcLink[] | null;
   centroid: [number, number, number];
   origin_extent: [[number, number, number], [number, number, number]];
+};
+
+/**
+ * One part of a piece and the IFC element it was matched to by position and size. The IFC is a
+ * reference only: it names the part for people working from the IFC, and changes nothing.
+ */
+export type IfcLink = {
+  instance_id: string;
+  body: number | null;
+  mark: string | null;
+  designation: string | null;
+  /** null: the model has an IFC, but nothing in it sits where this part does. */
+  global_id: string | null;
+  ifc_type: string | null;
+  ifc_designation: string | null;
+  /** The detailer's own mark for the part (Pset_*Common.Reference). */
+  reference: string | null;
+  /** An identical twin sat in the same place, so which of the two ids this got is arbitrary. */
+  twin: boolean;
+  /**
+   * "exact": place, size and volume all agree. "loose": place and size agree but the IFC models
+   * the part with a different amount of steel (10335's C200 purlins: 13% less) — approximate.
+   */
+  basis: "exact" | "loose" | null;
 };
 
 export type StepItem = { unit_path: string };
