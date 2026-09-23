@@ -39,6 +39,7 @@ const SPLIT = [0xe0a458, 0x7fb069, 0xc97c9d, 0x6fb7c9, 0xd9c35c, 0x9a8ad9, 0xb58
 const GHOST = 0xc7ced4;
 const SELECTED = 0xff8c1a;
 const JOINT_PART = 0xffd84d;
+const SIDE_KEY = "cad-review:piece-side";
 const MARK = { held: 0xe07b1a, erased: 0xd13b3b, bolt: 0x2f6fd6, contact: 0x8a96a3,
                link: 0x2e9e5b } as const;
 
@@ -49,8 +50,19 @@ function holds(j: Joint, e?: Edit): boolean {
   return j.joins;
 }
 
-export function PieceEditor({ modelId, prefix, piece, onSaved }: {
+export type Highlight = { a: string; b?: string | null } | null;
+
+export function PieceEditor({ modelId, prefix, piece, onSaved, panel, panelLabel, highlight,
+                              prefer }: {
   modelId: string; prefix: string; piece: string; onSaved: (piece: string | null) => void;
+  /** A second panel beside the model - the rules, so they are read against the steel rather
+   *  than below it, where Steve had to scroll and lost sight of what was highlighted. */
+  panel?: React.ReactNode; panelLabel?: string;
+  /** Kinds of part to light up, from hovering a row in that panel. */
+  highlight?: Highlight;
+  /** Which side to open on when nothing has been chosen before: a piece there are many of is
+   *  usually answered with a rule, a one-off by editing its own joints. */
+  prefer?: "joints" | "panel";
 }) {
   const box = useRef<HTMLDivElement>(null);
   const three = useRef<{
@@ -66,6 +78,18 @@ export function PieceEditor({ modelId, prefix, piece, onSaved }: {
   const [hoverPart, setHoverPart] = useState<string | null>(null);
   const [show, setShow] = useState({ welds: true, bolts: true, contacts: false, neighbours: true });
   const [saving, setSaving] = useState(false);
+  const [side, setSide] = useState<"joints" | "panel">(prefer ?? "joints");
+  // The side last worked in sticks across pieces - somebody setting rules stays in the rules.
+  useEffect(() => {
+    try {
+      const kept = window.localStorage.getItem(SIDE_KEY);
+      if (kept === "joints" || kept === "panel") setSide(kept);
+    } catch { /* private window, blocked storage: the preference is a convenience */ }
+  }, []);
+  function chooseSide(k: "joints" | "panel") {
+    setSide(k);
+    try { window.localStorage.setItem(SIDE_KEY, k); } catch { /* as above */ }
+  }
   const rowRefs = useRef<Map<string, HTMLLIElement>>(new Map());
 
   const api = `/cad-review/api/cad/models/${modelId}`;
@@ -282,12 +306,25 @@ export function PieceEditor({ modelId, prefix, piece, onSaved }: {
     const t = three.current;
     if (!t || !scene || !layout) return;
     const hj = hoverJoint ? scene.joints.find((j) => j.id === hoverJoint) : null;
+    // A row hovered in the side panel is about KINDS of part: light every part of that kind,
+    // and show only the joints between them.
+    const hk = highlight
+      ? (p: Part) => p.kind === highlight.a || (!!highlight.b && p.kind === highlight.b)
+      : null;
+    const hkJoint = highlight
+      ? (j: Joint) => {
+          const ka = byId.get(j.a)?.kind, kb = byId.get(j.b)?.kind;
+          if (!highlight.b) return ka === highlight.a || kb === highlight.a;
+          return (ka === highlight.a && kb === highlight.b)
+              || (ka === highlight.b && kb === highlight.a);
+        }
+      : null;
     for (const p of scene.parts) {
       const o = t.parts.get(p.id);
       if (!o) continue;
       const inAPiece = layout.colourOf.has(p.id);
       o.group.visible = inAPiece || show.neighbours;
-      const ofJoint = !!hj && (hj.a === p.id || hj.b === p.id);
+      const ofJoint = (!!hj && (hj.a === p.id || hj.b === p.id)) || !!hk?.(p);
       const lit = sel.has(p.id) || p.id === hoverPart || ofJoint;
       // The two parts of the joint being hovered turn yellow: among 400 parts an emissive tint
       // alone does not find them.
@@ -307,14 +344,17 @@ export function PieceEditor({ modelId, prefix, piece, onSaved }: {
         : j.kind === "link" ? true : show.contacts;
       const touchesSel = sel.size === 0 || sel.has(j.a) || sel.has(j.b);
       // While a joint is hovered it is the ONLY marker shown: one dot among 500 is not findable.
-      m.visible = hoverJoint ? j.id === hoverJoint : kindOn && touchesSel;
+      // A kind hovered in the side panel shows exactly the joints that rule would act on.
+      m.visible = hoverJoint ? j.id === hoverJoint
+        : hkJoint ? hkJoint(j)
+        : kindOn && touchesSel;
       const col = (e === "link" || (h && j.kind !== "weld")) ? MARK.link
         : j.kind === "weld" ? (h ? MARK.held : MARK.erased)
         : j.kind === "bolt" ? MARK.bolt : MARK.contact;
       (m.material as THREE_NS.MeshBasicMaterial).color.setHex(col);
       m.scale.setScalar(j.id === hoverJoint ? 2.4 : 1);
     }
-  }, [scene, layout, edits, sel, hoverJoint, hoverPart, show]);
+  }, [scene, layout, edits, sel, hoverJoint, hoverPart, show, highlight, byId]);
 
   function setEdit(j: Joint, e: Edit | null) {
     setEdits((prev) => {
@@ -411,8 +451,9 @@ export function PieceEditor({ modelId, prefix, piece, onSaved }: {
         </div>
       )}
 
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_26rem]">
-        <div className="relative">
+      <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,1fr)_26rem]">
+        {/* Sticky: the rules are read against the steel, so the model must not scroll away. */}
+        <div className="relative lg:sticky lg:top-3">
           <div ref={box} className="h-[72vh] w-full overflow-hidden rounded-lg border border-slate-200" />
           {!scene && <p className="absolute inset-0 flex items-center justify-center text-sm
                                   text-slate-500">Loading the piece…</p>}
@@ -429,7 +470,25 @@ export function PieceEditor({ modelId, prefix, piece, onSaved }: {
           </p>
         </div>
 
-        <div className="space-y-2 lg:max-h-[78vh] lg:overflow-y-auto">
+        <div className="space-y-2">
+          {panel && (
+            <div className="flex gap-1 border-b border-slate-200">
+              {([["joints", `Joints${scene ? ` (${scene.joints.length})` : ""}`],
+                 ["panel", panelLabel ?? "Rules"]] as const).map(([k, text]) => (
+                <button key={k} onClick={() => chooseSide(k)}
+                        className={`-mb-px border-b-2 px-3 py-1.5 text-sm ${side === k
+                          ? "border-slate-900 font-medium text-slate-900"
+                          : "border-transparent text-slate-500 hover:text-slate-800"}`}>
+                  {text}
+                </button>
+              ))}
+            </div>
+          )}
+          {panel && side === "panel" && (
+            <div className="lg:max-h-[74vh] lg:overflow-y-auto">{panel}</div>
+          )}
+          <div className={`space-y-2 lg:max-h-[74vh] lg:overflow-y-auto ${
+            panel && side !== "joints" ? "hidden" : ""}`}>
           <div className="flex flex-wrap gap-x-3 gap-y-1 rounded-lg border border-slate-200 bg-white
                           px-3 py-2 text-xs text-slate-700">
             <Toggle on={show.welds} set={(v) => setShow({ ...show, welds: v })}
@@ -518,6 +577,7 @@ export function PieceEditor({ modelId, prefix, piece, onSaved }: {
                 Showing 400 of {listed.length}. Click a part to list only its joints.
               </p>
             )}
+          </div>
           </div>
         </div>
       </div>

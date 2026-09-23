@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { PieceEditor } from "./PieceEditor";
+import { PieceEditor, type Highlight } from "./PieceEditor";
 
 /**
  * One kind of piece, opened up so it can be refined (bd kl1y.6).
@@ -51,6 +51,9 @@ export function PieceView({ modelId, prefix, piece }: {
   const [note, setNote] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
   const [name, setName] = useState("");
+  // Which kinds the model should light up: set by hovering a rules row, so a rule is checked
+  // against the steel before it is saved.
+  const [lit, setLit] = useState<Highlight>(null);
 
   const api = `/cad-review/api/cad/models/${modelId}`;
   const qs = `prefix=${encodeURIComponent(prefix)}`;
@@ -189,19 +192,20 @@ export function PieceView({ modelId, prefix, piece }: {
         </div>
       </div>
 
-      <PieceEditor modelId={modelId} prefix={prefix} piece={piece}
-                   onSaved={(k) => router.push(k ? `/${modelId}/isolate/?${qs}&piece=${k}`
-                                                 : nodeHref)} />
-
       {err && <Warn>{err}</Warn>}
       {note && <p className="text-sm text-slate-600">{note}</p>}
       {busy && <p className="text-sm text-slate-500">{busy}</p>}
 
-      <details className="rounded-lg border border-slate-200 bg-white px-4 py-2">
-        <summary className="cursor-pointer text-sm font-medium text-slate-700">
-          Rules for every piece like this — by kind of part
-        </summary>
-        <div className="mt-3 space-y-4">
+      <PieceEditor modelId={modelId} prefix={prefix} piece={piece} highlight={lit}
+                   panelLabel="Rules by kind" prefer={p.qty > 1 ? "panel" : "joints"}
+                   onSaved={(k) => router.push(k ? `/${modelId}/isolate/?${qs}&piece=${k}`
+                                                 : nodeHref)}
+                   panel={
+        <div className="space-y-4">
+          <p className="text-xs text-slate-500">
+            These are rules about a <em>kind</em> of part, so each applies to all {p.qty} pieces
+            like this one. Hover a row to see what it would act on in the model.
+          </p>
       {preview && (
         <div className="space-y-2 rounded-lg border-2 border-slate-900 bg-white p-4">
           <div className="text-sm font-semibold">{describe(preview.trial, d)}</div>
@@ -233,7 +237,7 @@ export function PieceView({ modelId, prefix, piece }: {
 
       <Section title="What it is made of">
         {d.parts.map((k) => (
-          <Row key={k.kind}
+          <Row key={k.kind} onHover={(on) => setLit(on ? { a: k.kind } : null)}
                left={<>
                  <span className="font-medium">{k.name}</span>
                  <span className="ml-2 text-xs text-slate-500">
@@ -259,6 +263,7 @@ export function PieceView({ modelId, prefix, piece }: {
         {d.joints_inside.length === 0 && <Empty>One part — nothing joins inside it.</Empty>}
         {d.joints_inside.map((j) => (
           <Row key={`${j.kind_a}|${j.kind_b}|${j.joint}`}
+               onHover={(on) => setLit(on ? { a: j.kind_a, b: j.kind_b } : null)}
                left={<>
                  <span className="font-medium">{j.name_a} ↔ {j.name_b}</span>
                  <span className="ml-2 text-xs text-slate-500">
@@ -282,6 +287,7 @@ export function PieceView({ modelId, prefix, piece }: {
         {d.joints_out.length === 0 && <Empty>Nothing - it stands alone.</Empty>}
         {d.joints_out.map((j) => (
           <Row key={`${j.kind_a}|${j.kind_b}|${j.joint}`}
+               onHover={(on) => setLit(on ? { a: j.kind_a, b: j.kind_b } : null)}
                left={<>
                  <span className="font-medium">{j.name_a} ↔ {j.name_b}</span>
                  <span className="ml-2 text-xs text-slate-500">
@@ -301,7 +307,7 @@ export function PieceView({ modelId, prefix, piece }: {
         ))}
       </Section>
         </div>
-      </details>
+      } />
     </div>
   );
 }
@@ -330,9 +336,13 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Row({ left, right }: { left: React.ReactNode; right: React.ReactNode }) {
+function Row({ left, right, onHover }: {
+  left: React.ReactNode; right: React.ReactNode; onHover?: (on: boolean) => void;
+}) {
   return (
-    <li className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 text-sm">
+    <li onMouseEnter={() => onHover?.(true)} onMouseLeave={() => onHover?.(false)}
+        className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 text-sm
+                   hover:bg-amber-50">
       <div className="min-w-0">{left}</div>
       <div className="flex flex-wrap gap-1.5">{right}</div>
     </li>
