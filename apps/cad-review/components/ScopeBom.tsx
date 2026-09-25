@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { AssemblyList, CsvLinks, MaterialTable, TotalsBar,
-         type AssemblyLine, type PartLine, type Totals } from "./BomTables";
+import { AccessSchedule, AssemblyList, CsvLinks, MaterialTable, TotalsBar,
+         type AccessLine, type AccessTotals, type AssemblyLine, type PartLine,
+         type Totals } from "./BomTables";
 
 /**
  * One node's bill of materials, as it stands (bd kl1y.7).
@@ -17,12 +18,13 @@ type Bom = {
   prefix: string; name: string | null;
   signoff: { signed_at: string; note: string | null } | null;
   assemblies: AssemblyLine[]; material: PartLine[]; totals: Totals;
+  access: { lines: AccessLine[]; totals: AccessTotals };
 };
 
 export function ScopeBom({ modelId, prefix }: { modelId: string; prefix: string }) {
   const [bom, setBom] = useState<Bom | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [view, setView] = useState<"assemblies" | "material">("assemblies");
+  const [view, setView] = useState<"assemblies" | "material" | "access">("assemblies");
   const [reload, setReload] = useState(0);
   const [busy, setBusy] = useState(false);
 
@@ -64,7 +66,8 @@ export function ScopeBom({ modelId, prefix }: { modelId: string; prefix: string 
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <TotalsBar t={bom.totals} />
-        <CsvLinks href={(v) => `${api}/isolate/bom.csv?${qs}&view=${v}`} />
+        <CsvLinks href={(v) => `${api}/isolate/bom.csv?${qs}&view=${v}`}
+                  access={!!bom.access?.lines?.length} />
       </div>
 
       <div className={`flex flex-wrap items-center gap-3 rounded-lg border px-4 py-2 text-sm ${
@@ -96,18 +99,22 @@ export function ScopeBom({ modelId, prefix }: { modelId: string; prefix: string 
       </div>
 
       <div className="flex gap-1 border-b border-slate-200">
-        {(["assemblies", "material"] as const).map((v) => (
+        {(["assemblies", "material", "access"] as const).map((v) => (
+          v === "access" && !bom.access?.lines?.length ? null : (
           <button key={v} onClick={() => setView(v)}
                   className={`-mb-px border-b-2 px-3 py-1.5 text-sm ${view === v
                     ? "border-slate-900 font-medium" : "border-transparent text-slate-500"}`}>
             {v === "assemblies" ? `Assemblies (${bom.totals.assembly_kinds.toLocaleString()})`
-              : `Material list (${bom.totals.part_kinds.toLocaleString()})`}
-          </button>
+              : v === "material" ? `Material list (${bom.totals.part_kinds.toLocaleString()})`
+              : `Stairs & access (${bom.access.lines.length.toLocaleString()})`}
+          </button>)
         ))}
       </div>
       {view === "assemblies"
         ? <AssemblyList rows={bom.assemblies} modelId={modelId} picPrefix={() => prefix} />
-        : <MaterialTable rows={bom.material} modelId={modelId} />}
+        : view === "material"
+        ? <MaterialTable rows={bom.material} modelId={modelId} />
+        : <AccessSchedule rows={bom.access.lines} totals={bom.access.totals} />}
     </div>
   );
 }

@@ -208,13 +208,115 @@ function More({ total, shown, setShown }: {
   );
 }
 
-export function CsvLinks({ href }: { href: (view: "assemblies" | "material") => string }) {
+export function CsvLinks({ href, access }: {
+  href: (view: "assemblies" | "material" | "access") => string; access?: boolean;
+}) {
   return (
     <div className="flex gap-2">
       <a href={href("assemblies")}
          className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white">Assemblies CSV</a>
       <a href={href("material")}
          className="rounded border border-slate-300 px-3 py-1.5 text-sm">Material list CSV</a>
+      {access && (
+        <a href={href("access")}
+           className="rounded border border-slate-300 px-3 py-1.5 text-sm">Stair schedule CSV</a>
+      )}
+    </div>
+  );
+}
+
+/** What the geometry worked out a piece IS: a flight, its landing, a ladder, a run of handrail. */
+export type AccessLine = {
+  kind: "flight" | "landing" | "ladder" | "handrail";
+  label: string; name: string | null; qty: number;
+  parts_per_piece: number; mass_each_kg: number; mass_total_kg: number;
+  treads?: number; step_rise_mm?: number; rise_mm?: number; going_mm?: number;
+  stringer?: string | null; stringers?: number;
+  rungs?: number; pitch_mm?: number; width_mm?: number;
+  rails?: number; posts?: number; metres?: number; handrail_m?: number;
+};
+
+export type AccessTotals = {
+  flights: number; steps: number; landings: number; ladders: number; rungs: number;
+  handrail_m: number; mass_kg: number;
+};
+
+const KIND_LOOK: Record<AccessLine["kind"], string> = {
+  flight: "bg-sky-100 text-sky-800", landing: "bg-indigo-100 text-indigo-800",
+  ladder: "bg-amber-100 text-amber-800", handrail: "bg-emerald-100 text-emerald-800",
+};
+
+/**
+ * The stair and ladder schedule, as a quote wants it: one line per distinct flight, ladder or run
+ * of handrail, with how many off, its rise and going, its steps and its stringer.
+ *
+ * The numbers are not a second guess at the model - they come off the same pieces the assemblies
+ * list shows, so the two can never disagree.
+ */
+export function AccessSchedule({ rows, totals }: { rows: AccessLine[]; totals: AccessTotals }) {
+  if (!rows.length) {
+    return <p className="text-sm text-slate-500">
+      No stairs, ladders or handrail found in this node.
+    </p>;
+  }
+  const mm = (v?: number) => (v === undefined || v === null ? "" : Math.round(v).toLocaleString());
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap gap-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm">
+        <span><b>{totals.flights}</b> stair flights</span>
+        <span><b>{totals.steps}</b> steps</span>
+        <span><b>{totals.landings}</b> landings</span>
+        <span><b>{totals.ladders}</b> ladders{totals.rungs ? ` (${totals.rungs} rungs)` : ""}</span>
+        <span><b>{totals.handrail_m.toLocaleString()}</b> m handrail</span>
+        <span className="text-slate-500">{(totals.mass_kg / 1000).toFixed(2)} t</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-left text-xs uppercase text-slate-500">
+            <tr className="border-b border-slate-200">
+              <th className="py-1.5 pr-3">What</th>
+              <th className="py-1.5 pr-3">Piece</th>
+              <th className="py-1.5 pr-3 text-right">Off</th>
+              <th className="py-1.5 pr-3 text-right">Steps</th>
+              <th className="py-1.5 pr-3 text-right">Step rise</th>
+              <th className="py-1.5 pr-3 text-right">Rise</th>
+              <th className="py-1.5 pr-3 text-right">Going</th>
+              <th className="py-1.5 pr-3">Stringer</th>
+              <th className="py-1.5 pr-3 text-right">Parts</th>
+              <th className="py-1.5 pr-3 text-right">kg each</th>
+              <th className="py-1.5 text-right">kg total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, n) => (
+              <tr key={n} className="border-b border-slate-100 last:border-0">
+                <td className="py-1.5 pr-3">
+                  <span className={`rounded px-1.5 py-0.5 text-xs ${KIND_LOOK[r.kind]}`}>
+                    {r.kind}
+                  </span>
+                </td>
+                <td className="py-1.5 pr-3">{r.name || r.label}</td>
+                <td className="py-1.5 pr-3 text-right">{r.qty}</td>
+                <td className="py-1.5 pr-3 text-right">{r.treads ?? r.rungs ?? ""}</td>
+                <td className="py-1.5 pr-3 text-right">{mm(r.step_rise_mm ?? r.pitch_mm)}</td>
+                <td className="py-1.5 pr-3 text-right">{mm(r.rise_mm)}</td>
+                <td className="py-1.5 pr-3 text-right">
+                  {r.kind === "handrail" ? `${r.metres} m` : mm(r.going_mm ?? r.width_mm)}
+                </td>
+                <td className="py-1.5 pr-3">{r.stringer || ""}</td>
+                <td className="py-1.5 pr-3 text-right">{r.parts_per_piece}</td>
+                <td className="py-1.5 pr-3 text-right">{Math.round(r.mass_each_kg).toLocaleString()}</td>
+                <td className="py-1.5 text-right">{Math.round(r.mass_total_kg).toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-slate-500">
+        Steps are counted by height, so a stair reads the same whether its treads span both
+        stringers or sit on one. A run of inclined steel with nothing evenly spaced on it is not a
+        stair, and stays in the frame.
+      </p>
     </div>
   );
 }
