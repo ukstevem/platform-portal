@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AssemblyViewer } from "./AssemblyViewer";
 import { PreparePicturesBar } from "./PreparePictures";
+import { LayoutDrawings } from "./LayoutDrawings";
 import { ScopeBom } from "./ScopeBom";
 import { Thumb } from "./Thumb";
 
@@ -62,7 +63,8 @@ export function Isolation({ modelId, prefix, view }: {
   const [picsVersion, setPicsVersion] = useState(0);
   const onPicsMissing = useCallback(() => setPicsMissing(true), []);
   const [reload, setReload] = useState(0);
-  const [tab, setTab] = useState<"pieces" | "bom">(view === "bom" ? "bom" : "pieces");
+  const [tab, setTab] = useState<"layout" | "pieces" | "bom">(
+    view === "bom" ? "bom" : view === "layout" ? "layout" : "pieces");
   const [accepting, setAccepting] = useState(false);
   const [acceptNote, setAcceptNote] = useState<string | null>(null);
 
@@ -215,8 +217,11 @@ export function Isolation({ modelId, prefix, view }: {
         }} />
       )}
 
+      {/* Levels and grids come FIRST (Steve, 2026-09-25: "we need to get the grid and levels
+          set first"): a piece is far easier to recognise once it has an address. */}
       <div className="flex gap-1 border-b border-slate-200">
-        {([["pieces", "Pieces"], ["bom", "Bill of materials"]] as const).map(([k, label]) => (
+        {([["layout", "Levels & grids"], ["pieces", "Pieces"],
+           ["bom", "Bill of materials"]] as const).map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)}
                   className={`-mb-px border-b-2 px-4 py-2 text-sm ${tab === k
                     ? "border-slate-900 font-medium text-slate-900"
@@ -226,7 +231,8 @@ export function Isolation({ modelId, prefix, view }: {
         ))}
       </div>
 
-      {tab === "bom" ? <ScopeBom modelId={modelId} prefix={prefix} /> : (
+      {tab === "layout" ? <LayoutDrawings modelId={modelId} prefix={prefix} />
+       : tab === "bom" ? <ScopeBom modelId={modelId} prefix={prefix} /> : (
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_26rem]">
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">

@@ -79,3 +79,14 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
 export async function POST(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
   return forward(req, (await ctx.params).path);
 }
+
+// PUT and DELETE exist because the API uses them where they are the honest verb: keeping the
+// levels and grids a person has settled REPLACES the set (PUT), and going back to what the steel
+// says removes it (DELETE). Without these the request 405s at the proxy, not at the service.
+export async function PUT(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
+  return forward(req, (await ctx.params).path);
+}
+
+export async function DELETE(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
+  return forward(req, (await ctx.params).path);
+}
