@@ -256,11 +256,20 @@ export type AccessLine = {
   stringer?: string | null; stringers?: number;
   rungs?: number; pitch_mm?: number; width_mm?: number;
   rails?: number; posts?: number; metres?: number; handrail_m?: number;
+  /** Which staircases this kind of flight is built into - a list, because one kind can be used
+   *  in two different towers (bd afnl). */
+  runs?: number[];
 };
 
 export type AccessTotals = {
   flights: number; steps: number; landings: number; ladders: number; rungs: number;
-  handrail_m: number; mass_kg: number;
+  handrail_m: number; mass_kg: number; runs?: number;
+};
+/** A staircase: the flights that climb from one level to another over their half-landings. */
+export type StairRun = {
+  run: number; flights: number; steps: number; rise_mm: number;
+  from: string | null; to: string | null; levels: string[];
+  prefix?: string; node?: string | null;
 };
 
 const KIND_LOOK: Record<AccessLine["kind"], string> = {
@@ -275,7 +284,9 @@ const KIND_LOOK: Record<AccessLine["kind"], string> = {
  * The numbers are not a second guess at the model - they come off the same pieces the assemblies
  * list shows, so the two can never disagree.
  */
-export function AccessSchedule({ rows, totals }: { rows: AccessLine[]; totals: AccessTotals }) {
+export function AccessSchedule({ rows, totals, runs, missing }: {
+  rows: AccessLine[]; totals: AccessTotals; runs?: StairRun[]; missing?: string[];
+}) {
   if (!rows.length) {
     return <p className="text-sm text-slate-500">
       No stairs, ladders or handrail found in this node.
@@ -285,6 +296,7 @@ export function AccessSchedule({ rows, totals }: { rows: AccessLine[]; totals: A
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap gap-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm">
+        {runs?.length ? <span><b>{runs.length}</b> staircases</span> : null}
         <span><b>{totals.flights}</b> stair flights</span>
         <span><b>{totals.steps}</b> steps</span>
         <span><b>{totals.landings}</b> landings</span>
@@ -292,11 +304,42 @@ export function AccessSchedule({ rows, totals }: { rows: AccessLine[]; totals: A
         <span><b>{totals.handrail_m.toLocaleString()}</b> m handrail</span>
         <span className="text-slate-500">{(totals.mass_kg / 1000).toFixed(2)} t</span>
       </div>
+      {runs?.length ? (
+        <div className="rounded-lg border border-slate-200 p-3">
+          <div className="mb-2 text-sm font-medium">
+            Staircases — flights chained over their half-landings
+          </div>
+          <table className="w-full text-sm">
+            <tbody>
+              {runs.map((r) => (
+                <tr key={`${r.prefix ?? ""}${r.run}`}
+                    className="border-b border-slate-100 last:border-0">
+                  <td className="py-1 pr-3 font-medium">Run {r.run}</td>
+                  <td className="py-1 pr-3">{r.from ? `${r.from} to ${r.to}` : "no level"}</td>
+                  <td className="py-1 pr-3 text-right tabular-nums">{r.flights} flights</td>
+                  <td className="py-1 pr-3 text-right tabular-nums">{r.steps} steps</td>
+                  <td className="py-1 pr-3 text-right tabular-nums">
+                    {(r.rise_mm / 1000).toFixed(1)} m</td>
+                  <td className="py-1 pr-3 text-xs text-slate-500">{r.levels.join(" · ")}</td>
+                  {r.node ? <td className="py-1 text-xs text-slate-400">{r.node}</td> : null}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className={`mt-2 text-xs ${missing?.length ? "text-amber-800" : "text-emerald-800"}`}>
+            {missing?.length
+              ? `No stair reaches ${missing.join(", ")} — either a missed detection or a gap in the design.`
+              : "Every level is reached by a stair."}
+          </p>
+        </div>
+      ) : null}
+
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="text-left text-xs uppercase text-slate-500">
             <tr className="border-b border-slate-200">
               <th className="py-1.5 pr-3">What</th>
+              <th className="py-1.5 pr-3">Run</th>
               <th className="py-1.5 pr-3">Piece</th>
               <th className="py-1.5 pr-3 text-right">Off</th>
               <th className="py-1.5 pr-3 text-right">Steps</th>
@@ -317,6 +360,8 @@ export function AccessSchedule({ rows, totals }: { rows: AccessLine[]; totals: A
                     {r.kind}
                   </span>
                 </td>
+                <td className="py-1.5 pr-3 tabular-nums text-slate-500">
+                  {r.runs?.length ? r.runs.join(", ") : ""}</td>
                 <td className="py-1.5 pr-3">{r.name || r.label}</td>
                 <td className="py-1.5 pr-3 text-right">{r.qty}</td>
                 <td className="py-1.5 pr-3 text-right">{r.treads ?? r.rungs ?? ""}</td>

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AccessSchedule, AssemblyList, CsvLinks, MaterialTable, TotalsBar,
          type AccessLine, type AccessTotals, type AssemblyLine, type PartLine,
-         type Totals } from "./BomTables";
+         type StairRun, type Totals } from "./BomTables";
 
 /**
  * One node's bill of materials, as it stands (bd kl1y.7).
@@ -18,7 +18,8 @@ type Bom = {
   prefix: string; name: string | null;
   signoff: { signed_at: string; note: string | null } | null;
   assemblies: AssemblyLine[]; material: PartLine[]; totals: Totals;
-  access: { lines: AccessLine[]; totals: AccessTotals };
+  access: { lines: AccessLine[]; totals: AccessTotals; runs?: StairRun[];
+            levels_without_access?: string[] };
 };
 
 export function ScopeBom({ modelId, prefix }: { modelId: string; prefix: string }) {
@@ -114,7 +115,9 @@ export function ScopeBom({ modelId, prefix }: { modelId: string; prefix: string 
         ? <AssemblyList rows={bom.assemblies} modelId={modelId} picPrefix={() => prefix} />
         : view === "material"
         ? <MaterialTable rows={bom.material} modelId={modelId} />
-        : <AccessSchedule rows={bom.access.lines} totals={bom.access.totals} />}
+        : <AccessSchedule rows={bom.access.lines} totals={bom.access.totals}
+                          runs={bom.access.runs}
+                          missing={bom.access.levels_without_access} />}
     </div>
   );
 }
