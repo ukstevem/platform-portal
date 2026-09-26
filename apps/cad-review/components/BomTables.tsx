@@ -20,7 +20,26 @@ export type AssemblyLine = {
   parts_per_piece: number; mass_each_kg: number; mass_total_kg: number; mass_complete: boolean;
   welds: number; weld_mm: number; bolted_to: number; bolts: number; supply: Supply;
   parts: PartLine[]; from?: { prefix: string; node: string | null; qty: number }[];
+  /** Where the pieces of this line are - one line can be twelve pieces in twelve places. Empty
+   *  until a person has settled the levels and the grid (bd s8r8.4). */
+  where?: string[]; levels?: string[];
 };
+
+/**
+ * Where a line's pieces are. On a real job the same grid intersection carries different columns
+ * at different levels - 21 of 23 of them on job 10335 - so a grid reference alone cannot name a
+ * piece and the level always travels with it.
+ */
+export function Where({ where, max = 3 }: { where?: string[]; max?: number }) {
+  if (!where?.length) return null;
+  const shown = where.slice(0, max);
+  return (
+    <span className="text-slate-600" title={where.join("\n")}>
+      {shown.join(" · ")}
+      {where.length > shown.length && ` +${where.length - shown.length} more`}
+    </span>
+  );
+}
 export type Totals = {
   assemblies: number; assembly_kinds: number; parts: number; part_kinds: number;
   mass_kg: Partial<Record<Supply, number>>; parts_mass_unknown: number;
@@ -73,6 +92,9 @@ export function AssemblyList({ rows, modelId, picPrefix }: {
                                    + `&piece=${a.key}`} className="h-[40px] w-[58px]" />
                     : <span className="h-[40px] w-[58px] shrink-0 rounded bg-slate-100" />}
                 <div className="min-w-0 flex-1">
+                  {a.where?.length ? (
+                    <div className="truncate text-xs"><Where where={a.where} /></div>
+                  ) : null}
                   <div className="truncate text-sm font-medium">{a.name || a.label}
                     {a.accepted && <span className="ml-2 text-xs font-normal text-slate-500">accepted</span>}
                   </div>

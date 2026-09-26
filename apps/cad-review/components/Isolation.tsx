@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AssemblyViewer } from "./AssemblyViewer";
+import { Where } from "./BomTables";
 import { PreparePicturesBar } from "./PreparePictures";
 import { GridSetup } from "./GridSetup";
 import { LevelReview } from "./LevelReview";
@@ -31,6 +32,10 @@ type Piece = {
   not_fabricated: boolean;
   supply: "make" | "buy" | "free_issue" | "excluded" | "mixed" | "unknown";
   marks: Mark[]; more_marks: number;
+  /** Where the pieces of this kind are, once a person has settled the levels and the grid. The
+   *  same intersection carries different columns at different levels, so the level travels with
+   *  the grid reference (bd s8r8.4). */
+  where?: string[]; levels?: string[];
 };
 type Scope = {
   prefix: string; name: string | null;
@@ -271,6 +276,7 @@ export function Isolation({ modelId, prefix, view }: {
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium">{p.label}</div>
                   <div className="truncate text-xs text-slate-500">
+                    {p.where?.length ? <><Where where={p.where} /> · </> : null}
                     {p.parts} part{p.parts === 1 ? "" : "s"}
                     {p.weld_count > 0 && ` · ${p.weld_count} welds`}
                     {p.bolted_to > 0 && ` · bolted to ${p.bolted_to}`}
@@ -348,6 +354,9 @@ function PieceDetail({ p, src, version, href, onNotReady, onClose }: {
       <div className="flex items-start justify-between gap-2">
         <div>
           <div className="text-base font-semibold">{p.label}</div>
+          {p.where?.length ? (
+            <div className="text-sm"><Where where={p.where} max={6} /></div>
+          ) : null}
           <div className="text-xs text-slate-500">
             ×{p.qty} · {p.parts} part{p.parts === 1 ? "" : "s"} each ·{" "}
             {p.mass_kg.toFixed(1)} kg each{p.mass_complete ? "" : " (some unknown)"}
