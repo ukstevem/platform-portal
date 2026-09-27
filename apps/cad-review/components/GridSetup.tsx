@@ -53,6 +53,15 @@ export function GridSetup({ modelId, prefix }: { modelId: string; prefix: string
   const svg = useRef<SVGSVGElement | null>(null);
 
   const api = `/cad-review/api/cad/models/${modelId}`;
+  /** What the service said, not just the number - a status code alone is not actionable. */
+  const why = useCallback(async (res: Response, what: string) => {
+    let detail = "";
+    try {
+      const body = await res.json();
+      detail = [body?.detail, body?.ref ? `(ref ${body.ref})` : ""].filter(Boolean).join(" ");
+    } catch { /* not json: the status is all there is */ }
+    return `${what} returned ${res.status}${detail ? ` — ${detail}` : ""}`;
+  }, []);
   const qs = `prefix=${encodeURIComponent(prefix)}`;
 
   useEffect(() => {
@@ -62,7 +71,7 @@ export function GridSetup({ modelId, prefix }: { modelId: string; prefix: string
         const at = z === null ? "" : `&z=${z}`;
         const res = await fetch(`${api}/layout/section/?${qs}${at}`, { cache: "no-store" });
         if (!live) return;
-        if (!res.ok) { setErr(`section returned ${res.status}`); return; }
+        if (!res.ok) { setErr(await why(res, "the section")); return; }
         const body: Section = await res.json();
         setErr(null); setSec(body);
         if (z === null) setZ(body.z);

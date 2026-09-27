@@ -35,6 +35,15 @@ export function LevelReview({ modelId, prefix }: { modelId: string; prefix: stri
   const cache = useRef<Map<number, string>>(new Map());
 
   const api = `/cad-review/api/cad/models/${modelId}`;
+  /** What the service said, not just the number - a status code alone is not actionable. */
+  const why = useCallback(async (res: Response, what: string) => {
+    let detail = "";
+    try {
+      const body = await res.json();
+      detail = [body?.detail, body?.ref ? `(ref ${body.ref})` : ""].filter(Boolean).join(" ");
+    } catch { /* not json: the status is all there is */ }
+    return `${what} returned ${res.status}${detail ? ` — ${detail}` : ""}`;
+  }, []);
   const qs = `prefix=${encodeURIComponent(prefix)}`;
 
   useEffect(() => {
@@ -43,7 +52,7 @@ export function LevelReview({ modelId, prefix }: { modelId: string; prefix: stri
       try {
         const res = await fetch(`${api}/layout/?${qs}`, { cache: "no-store" });
         if (!live) return;
-        if (!res.ok) { setErr(`layout returned ${res.status}`); return; }
+        if (!res.ok) { setErr(await why(res, "the layout")); return; }
         const body: Layout = await res.json();
         setLay(body); setErr(null);
       } catch { if (live) setErr("Could not reach the CAD service"); }
@@ -102,7 +111,7 @@ export function LevelReview({ modelId, prefix }: { modelId: string; prefix: stri
           naming: lay?.naming ?? { letters: "y", flip_x: false, flip_y: false },
         }),
       });
-      if (!res.ok) { setErr(`keeping the levels returned ${res.status}`); return; }
+      if (!res.ok) { setErr(await why(res, "keeping the levels")); return; }
       const body: Layout = await res.json();
       setLay(body); setKept(true);
     } catch { setErr("Could not reach the CAD service"); }
