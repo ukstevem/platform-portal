@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AssemblyViewer } from "./AssemblyViewer";
 import { Where } from "./BomTables";
+import { JointPairs } from "./JointPairs";
 import { LevelBar, type LevelRow } from "./LevelBar";
 import { PreparePicturesBar } from "./PreparePictures";
 import { GridSetup } from "./GridSetup";
@@ -73,9 +74,10 @@ export function Isolation({ modelId, prefix, view }: {
   const onPicsMissing = useCallback(() => setPicsMissing(true), []);
   const [reload, setReload] = useState(0);
   const [level, setLevel] = useState("");
-  const [tab, setTab] = useState<"grid" | "levels" | "pieces" | "bom">(
+  const [tab, setTab] = useState<"grid" | "levels" | "joints" | "pieces" | "bom">(
     view === "bom" ? "bom" : view === "grid" ? "grid"
-      : view === "levels" || view === "layout" ? "levels" : "pieces");
+      : view === "levels" || view === "layout" ? "levels"
+      : view === "joints" ? "joints" : "pieces");
   const [accepting, setAccepting] = useState(false);
   const [acceptNote, setAcceptNote] = useState<string | null>(null);
 
@@ -233,8 +235,8 @@ export function Isolation({ modelId, prefix, view }: {
           first"), and they are SEPARATE (2026-09-26: "we need to split what we are doing, grids
           and levels, one by one, the drawings are too busy"). One drawing, one question. */}
       <div className="flex gap-1 border-b border-slate-200">
-        {([["grid", "1 · Grid"], ["levels", "2 · Levels"], ["pieces", "Pieces"],
-           ["bom", "Bill of materials"]] as const).map(([k, label]) => (
+        {([["grid", "1 · Grid"], ["levels", "2 · Levels"], ["joints", "3 · Joints"],
+           ["pieces", "Pieces"], ["bom", "Bill of materials"]] as const).map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)}
                   className={`-mb-px border-b-2 px-4 py-2 text-sm ${tab === k
                     ? "border-slate-900 font-medium text-slate-900"
@@ -258,7 +260,10 @@ export function Isolation({ modelId, prefix, view }: {
         </div>
       )}
 
-      {tab === "grid" ? <GridSetup modelId={modelId} prefix={prefix} />
+      {tab === "joints" ? (
+        <JointPairs modelId={modelId} prefix={prefix}
+                    onChanged={() => setReload((n) => n + 1)} />)
+       : tab === "grid" ? <GridSetup modelId={modelId} prefix={prefix} />
        : tab === "levels" ? <LevelReview modelId={modelId} prefix={prefix} />
        : tab === "bom" ? <ScopeBom modelId={modelId} prefix={prefix} /> : (
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_26rem]">
