@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { LevelBar, type LevelRow } from "./LevelBar";
 import { AccessSchedule, AssemblyList, CsvLinks, MaterialTable, TotalsBar,
          type AccessLine, type AccessTotals, type AssemblyLine, type PartLine,
          type StairRun, type Totals } from "./BomTables";
@@ -16,6 +17,8 @@ import { AccessSchedule, AssemblyList, CsvLinks, MaterialTable, TotalsBar,
 
 type Bom = {
   prefix: string; name: string | null;
+  /** The node a floor at a time, and which floor this BOM is for (bd s8r8.5). */
+  levels?: LevelRow[]; level?: string | null;
   signoff: { signed_at: string; note: string | null } | null;
   assemblies: AssemblyLine[]; material: PartLine[]; totals: Totals;
   access: { lines: AccessLine[]; totals: AccessTotals; runs?: StairRun[];
@@ -27,10 +30,12 @@ export function ScopeBom({ modelId, prefix }: { modelId: string; prefix: string 
   const [err, setErr] = useState<string | null>(null);
   const [view, setView] = useState<"assemblies" | "material" | "access">("assemblies");
   const [reload, setReload] = useState(0);
+  const [level, setLevel] = useState("");
   const [busy, setBusy] = useState(false);
 
   const api = `/cad-review/api/cad/models/${modelId}`;
-  const qs = `prefix=${encodeURIComponent(prefix)}`;
+  const qs = `prefix=${encodeURIComponent(prefix)}`
+    + (level ? `&level=${encodeURIComponent(level)}` : "");
 
   useEffect(() => {
     let live = true;
@@ -52,7 +57,7 @@ export function ScopeBom({ modelId, prefix }: { modelId: string; prefix: string 
       const res = done
         ? await fetch(`${api}/isolate/signoff/`, {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ prefix }) })
+            body: JSON.stringify({ prefix, level }) })
         : await fetch(`${api}/isolate/signoff/?${qs}`, { method: "DELETE" });
       if (!res.ok) { setErr(`sign-off returned ${res.status}`); return; }
       setReload((n) => n + 1);
@@ -65,6 +70,10 @@ export function ScopeBom({ modelId, prefix }: { modelId: string; prefix: string 
 
   return (
     <div className="space-y-3">
+      {(bom.levels?.length ?? 0) > 1 && (
+        <LevelBar levels={bom.levels!} level={level} onPick={setLevel} />
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <TotalsBar t={bom.totals} />
         <CsvLinks href={(v) => `${api}/isolate/bom.csv?${qs}&view=${v}`}
@@ -76,8 +85,9 @@ export function ScopeBom({ modelId, prefix }: { modelId: string; prefix: string 
         {bom.signoff ? (
           <>
             <span className="text-emerald-900">
-              Marked done {new Date(bom.signoff.signed_at).toLocaleString()} — this node is in the
-              master BOM, and follows any change made to it since.
+              {level || "This node"} marked done{" "}
+              {new Date(bom.signoff.signed_at).toLocaleString()} — it is in the master BOM, and
+              follows any change made to it since.
             </span>
             <Link href={`/${modelId}/?tab=master`}
                   className="rounded bg-slate-900 px-3 py-1 text-xs text-white">See the master BOM</Link>
@@ -88,12 +98,12 @@ export function ScopeBom({ modelId, prefix }: { modelId: string; prefix: string 
         ) : (
           <>
             <span className="text-slate-700">
-              When this node’s pieces are right, mark its BOM done and it is collated into the
-              master BOM.
+              When {level ? `the pieces at ${level} are` : "this node’s pieces are"} right, mark
+              {level ? " that level" : " its BOM"} done and it is collated into the master BOM.
             </span>
             <button onClick={() => signOff(true)} disabled={busy}
                     className="rounded bg-slate-900 px-3 py-1 text-sm text-white">
-              Mark this node’s BOM done</button>
+              Mark {level ? level : "this node’s BOM"} done</button>
           </>
         )}
         {err && <span className="text-amber-800">{err}</span>}

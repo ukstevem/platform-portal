@@ -22,6 +22,9 @@ type Master = {
   counted_in_outer: Record<string, string>;
   coverage: Coverage[]; units: Unit[];
   assemblies: AssemblyLine[]; material: PartLine[]; totals: Totals;
+  /** The job level by level (bd s8r8.5), each row saying whether it has been signed off. */
+  levels?: { level: string; prefix: string; node: string | null; pieces: number; kinds: number;
+             mass_kg: number; signoff?: { signed_at: string } | null }[];
 };
 
 const TONE: Record<string, string> = {
@@ -58,8 +61,39 @@ export function MasterBom({ modelId }: { modelId: string }) {
   if (!m) return <p className="text-sm text-slate-500">Collating…</p>;
 
   const notYet = m.coverage.filter((c) => c.status === "not yet" || c.status === "partly signed off");
+  const levels = m.levels ?? [];
   return (
     <div className="space-y-4">
+      {levels.length > 0 && (
+        <div className="rounded-lg border border-slate-200 p-3">
+          <div className="mb-2 text-sm font-medium">The job level by level</div>
+          <table className="w-full text-sm">
+            <tbody>
+              {levels.map((r) => (
+                <tr key={`${r.prefix}${r.level}`}
+                    className="border-b border-slate-100 last:border-0">
+                  <td className="py-1 pr-3 font-medium tabular-nums">{r.level}</td>
+                  <td className="py-1 pr-3 text-xs text-slate-500">{r.node}</td>
+                  <td className="py-1 pr-3 text-right tabular-nums">
+                    {r.pieces.toLocaleString()} pieces</td>
+                  <td className="py-1 pr-3 text-right tabular-nums">
+                    {(r.mass_kg / 1000).toFixed(1)} t</td>
+                  <td className="py-1 text-xs">
+                    {r.signoff
+                      ? <span className="text-emerald-800">signed off</span>
+                      : <span className="text-slate-400">not yet</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="mt-2 text-xs text-slate-500">
+            Columns, stair runs and bracing that cross floors are in &ldquo;between levels&rdquo;,
+            counted once — so these add up to the job rather than overlapping.
+          </p>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <TotalsBar t={m.totals} />
         <CsvLinks href={(v) => `${api}/master-bom.csv?view=${v}`} />

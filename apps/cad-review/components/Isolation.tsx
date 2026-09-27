@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AssemblyViewer } from "./AssemblyViewer";
 import { Where } from "./BomTables";
+import { LevelBar, type LevelRow } from "./LevelBar";
 import { PreparePicturesBar } from "./PreparePictures";
 import { GridSetup } from "./GridSetup";
 import { LevelReview } from "./LevelReview";
@@ -39,6 +40,8 @@ type Piece = {
 };
 type Scope = {
   prefix: string; name: string | null;
+  /** The node a floor at a time, and which floor is being looked at (bd s8r8.5). */
+  levels?: LevelRow[]; level?: string | null;
   breadcrumbs: { prefix: string; name: string | null }[];
   parts: number;
   detection: { revision: number; label: string | null; created_at: string;
@@ -69,6 +72,7 @@ export function Isolation({ modelId, prefix, view }: {
   const [picsVersion, setPicsVersion] = useState(0);
   const onPicsMissing = useCallback(() => setPicsMissing(true), []);
   const [reload, setReload] = useState(0);
+  const [level, setLevel] = useState("");
   const [tab, setTab] = useState<"grid" | "levels" | "pieces" | "bom">(
     view === "bom" ? "bom" : view === "grid" ? "grid"
       : view === "levels" || view === "layout" ? "levels" : "pieces");
@@ -82,7 +86,8 @@ export function Isolation({ modelId, prefix, view }: {
     let live = true;
     (async () => {
       try {
-        const res = await fetch(`${api}/isolate/?${qs}`, { cache: "no-store" });
+        const at = level ? `&level=${encodeURIComponent(level)}` : "";
+        const res = await fetch(`${api}/isolate/?${qs}${at}`, { cache: "no-store" });
         if (!live) return;
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
@@ -93,7 +98,7 @@ export function Isolation({ modelId, prefix, view }: {
       } catch { if (live) setErr("Could not reach the CAD service"); }
     })();
     return () => { live = false; };
-  }, [api, qs, reload]);
+  }, [api, qs, reload, level]);
 
   async function dropRule(id: number) {
     try {
@@ -238,6 +243,20 @@ export function Isolation({ modelId, prefix, view }: {
           </button>
         ))}
       </div>
+
+      {tab === "pieces" && (scope.levels?.length ?? 0) > 1 && (
+        <div className="space-y-1">
+          <LevelBar levels={scope.levels!} level={level} onPick={(l) => { setLevel(l); setSel(null); }} />
+          {level && (
+            <p className="text-xs text-slate-500">
+              Showing {level === "between levels"
+                ? "what is erected between floors — columns, stair runs and bracing"
+                : `what sits at ${level}`}. The pieces are the node&apos;s; a level only decides
+              which of them are listed.
+            </p>
+          )}
+        </div>
+      )}
 
       {tab === "grid" ? <GridSetup modelId={modelId} prefix={prefix} />
        : tab === "levels" ? <LevelReview modelId={modelId} prefix={prefix} />
