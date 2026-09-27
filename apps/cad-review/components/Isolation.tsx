@@ -34,6 +34,8 @@ type Piece = {
   not_fabricated: boolean;
   supply: "make" | "buy" | "free_issue" | "excluded" | "mixed" | "unknown";
   marks: Mark[]; more_marks: number;
+  /** What it is, and what in it is structure rather than fitting (bd 1tb4, 93ad). */
+  piece_kind?: string | null; structure?: number; fittings?: number;
   /** Where the pieces of this kind are, once a person has settled the levels and the grid. The
    *  same intersection carries different columns at different levels, so the level travels with
    *  the grid reference (bd s8r8.4). */
@@ -301,7 +303,11 @@ export function Isolation({ modelId, prefix, view }: {
                   <div className="truncate text-sm font-medium">{p.label}</div>
                   <div className="truncate text-xs text-slate-500">
                     {p.where?.length ? <><Where where={p.where} /> · </> : null}
-                    {p.parts} part{p.parts === 1 ? "" : "s"}
+                    {/* 64% of this job's parts are under 5 kg: cleats, packers, bolts. A column
+                        reading "82 parts" says nothing; "16 structural + 48 fittings" does. */}
+                    {p.fittings
+                      ? <>{p.structure} structural + {p.fittings} fittings</>
+                      : <>{p.parts} part{p.parts === 1 ? "" : "s"}</>}
                     {p.weld_count > 0 && ` · ${p.weld_count} welds`}
                     {p.bolted_to > 0 && ` · bolted to ${p.bolted_to}`}
                   </div>

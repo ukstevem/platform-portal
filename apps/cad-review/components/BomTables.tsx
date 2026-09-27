@@ -23,6 +23,8 @@ export type AssemblyLine = {
   /** Where the pieces of this line are - one line can be twelve pieces in twelve places. Empty
    *  until a person has settled the levels and the grid (bd s8r8.4). */
   where?: string[]; levels?: string[];
+  /** What it is, and what in it is structure rather than fitting (bd 1tb4, 93ad). */
+  piece_kind?: string | null; structure?: number; fittings?: number;
 };
 
 /**
@@ -99,7 +101,9 @@ export function AssemblyList({ rows, modelId, picPrefix }: {
                     {a.accepted && <span className="ml-2 text-xs font-normal text-slate-500">accepted</span>}
                   </div>
                   <div className="truncate text-xs text-slate-500">
-                    {a.parts_per_piece} part{a.parts_per_piece === 1 ? "" : "s"} each
+                    {a.fittings
+                      ? <>{a.structure} structural + {a.fittings} fittings each</>
+                      : <>{a.parts_per_piece} part{a.parts_per_piece === 1 ? "" : "s"} each</>}
                     {a.welds > 0 && ` · ${a.welds} welds`}
                     {a.bolted_to > 0 && ` · bolted to ${a.bolted_to}`}
                     {a.from && a.from.length > 1 && ` · from ${a.from.length} nodes`}

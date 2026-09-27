@@ -58,6 +58,9 @@ export function JointPairs({ modelId, prefix, onChanged }: {
   const [err, setErr] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
   const cache = useRef<Map<string, Effect>>(new Map());
+  const pics = useRef<Map<string, string | "none" | "unprepared">>(new Map());
+  const [shot, setShot] = useState<{ where?: string; loose?: string; state: string }>(
+    { state: "drawing" });
 
   const api = `/cad-review/api/cad/models/${modelId}`;
   const qs = `prefix=${encodeURIComponent(prefix)}`;
@@ -105,6 +108,45 @@ export function JointPairs({ modelId, prefix, onChanged }: {
     return body;
   }, [api, qs, why]);
 
+  /**
+   * The pair drawn IN THE BUILDING. Steve, 2026-09-27, after two attempts in words and numbers:
+   * "i still cant interpret the results from 'joints'... we need a 3d representation." Quite
+   * right - "271 welded, 230 bolted" is a fact about a spreadsheet. Seeing the stair stringers
+   * light up with their cleats is what tells a fabricator what the pair actually IS.
+   */
+  const picture = useCallback(async (r: Row, what: "where" | "loose", want: string) => {
+    const k = `${key(r)}|${what}|${what === "loose" ? want : ""}`;
+    const had = pics.current.get(k);
+    if (had) return had;
+    const res = await fetch(`${api}/isolate/joint-pairs/picture/?${qs}`
+      + `&kind_a=${encodeURIComponent(r.kind_a)}&kind_b=${encodeURIComponent(r.kind_b)}`
+      + `&what=${what}&rule=${want}`);
+    let got: string | "none" | "unprepared";
+    if (res.status === 202) got = "unprepared";
+    else if (res.status === 204 || !res.ok) got = "none";
+    else got = URL.createObjectURL(await res.blob());
+    pics.current.set(k, got);
+    return got;
+  }, [api, qs]);
+
+  useEffect(() => {
+    let live = true;
+    if (!row) { setShot({ state: "none" }); return; }
+    setShot({ state: "drawing" });
+    (async () => {
+      const where = await picture(row, "where", rule);
+      if (!live) return;
+      setShot((cur) => ({ ...cur, where: where.startsWith("blob") ? where : undefined,
+                          state: where === "unprepared" ? "unprepared" : "ready" }));
+      const loose = await picture(row, "loose", rule);
+      if (!live) return;
+      setShot((cur) => ({ ...cur, loose: loose.startsWith("blob") ? loose : undefined }));
+      const next = rows[at + 1];               // draw the next one while this is being read
+      if (next) void picture(next, "where", rule);
+    })();
+    return () => { live = false; };
+  }, [row, rows, at, rule, picture]);
+
   useEffect(() => {
     let live = true;
     if (!row) return;
@@ -134,6 +176,7 @@ export function JointPairs({ modelId, prefix, onChanged }: {
       });
       if (!res.ok) { setErr(await why(res, "taking the rule")); return; }
       cache.current.clear();                   // every preview is now measured against new rules
+      pics.current.clear();
       setReload((n) => n + 1);
       advance();
       onChanged?.();
@@ -201,6 +244,37 @@ export function JointPairs({ modelId, prefix, onChanged }: {
               ? "bg-amber-100 text-amber-900" : "bg-slate-100 text-slate-700"}`}>
               {Math.round(row.doubt * 100)}% disagree — mostly {row.mostly}
             </span>
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-4">
+            <figure className="space-y-1">
+              <figcaption className="text-xs uppercase tracking-wide text-slate-500">
+                Where this pair is
+              </figcaption>
+              <div className="flex h-[380px] w-[560px] items-center justify-center rounded border border-slate-200 bg-white">
+                {shot.where
+                  // eslint-disable-next-line @next/next/no-img-element
+                  ? <img src={shot.where} alt="where this pair is" width={560} height={380} />
+                  : <span className="text-sm text-slate-500">
+                      {shot.state === "unprepared"
+                        ? "The model's surfaces are not prepared yet — prepare the pictures on the Pieces tab."
+                        : shot.state === "drawing" ? "Drawing…" : "Nothing to draw."}
+                    </span>}
+              </div>
+            </figure>
+            <figure className="space-y-1">
+              <figcaption className="text-xs uppercase tracking-wide text-slate-500">
+                What comes loose if {rule === "site" ? "made on site" : "made in the shop"}
+              </figcaption>
+              <div className="flex h-[380px] w-[560px] items-center justify-center rounded border border-slate-200 bg-white">
+                {shot.loose
+                  // eslint-disable-next-line @next/next/no-img-element
+                  ? <img src={shot.loose} alt="what comes loose" width={560} height={380} />
+                  : <span className="text-sm text-slate-500">
+                      {shot.state === "drawing" ? "Working it out…" : "Nothing comes loose."}
+                    </span>}
+              </div>
+            </figure>
           </div>
 
           <div className="mt-3 rounded bg-slate-50 p-3 text-sm">
