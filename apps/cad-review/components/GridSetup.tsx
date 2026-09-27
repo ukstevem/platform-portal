@@ -20,14 +20,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type Part = { id: string; x1: number; y1: number; x2: number; y2: number;
               z0: number; z1: number; designation: string | null; column: boolean };
+/** Every column in the scope, whether or not this cut passes through it. */
+type Column = Omit<Part, "column"> & { cut: boolean };
 type Line = { position: number; label: string; primary: boolean; columns: number };
-/** A line the grid would need for columns that fit nowhere - offered, never taken silently. */
-type Candidate = { position: number; columns: number; at: [number, number][] };
-type Fit = { columns_total: number; adopted: number; unplaced: number;
-             candidates: { x: Candidate[]; y: Candidate[] } };
+type Fit = { columns_total: number; adopted: number; unplaced: number };
 type Section = {
   z: number; auto_z: number; columns_in_model: number; columns_cut: number;
-  parts: Part[]; grids: { x: Line[]; y: Line[] }; saved: boolean;
+  columns: Column[]; parts: Part[]; grids: { x: Line[]; y: Line[] }; saved: boolean;
   levels: { elevation: number; name: string }[];
   extent: { x: [number, number]; y: [number, number]; z: [number, number] };
 };
@@ -43,7 +42,6 @@ export function GridSetup({ modelId, prefix }: { modelId: string; prefix: string
   const [letters, setLetters] = useState<"x" | "y">("y");
   const [named, setNamed] = useState<{ x: Line[]; y: Line[] } | null>(null);
   const [fit, setFit] = useState<Fit | null>(null);
-  const [ignored, setIgnored] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [band, setBand] = useState<{ x0: number; y0: number; x1: number; y1: number;
@@ -73,12 +71,12 @@ export function GridSetup({ modelId, prefix }: { modelId: string; prefix: string
     return () => { live = false; };
   }, [api, qs, z]);
 
-  const columns = useMemo(() => (sec?.parts ?? []).filter((p) => p.column), [sec]);
-  /** Is there a line on the grid at this position? That is what "added" means - so the buttons
-   *  read the grid rather than remembering what was clicked, and cannot drift out of step. */
-  const hasLine = useCallback((axis: "x" | "y", position: number) =>
-    (named?.[axis] ?? []).some((l) => Math.abs(l.position - position) < 1.0), [named]);
-  const others = useMemo(() => (sec?.parts ?? []).filter((p) => !p.column), [sec]);
+  // ONE set to pick from: every column in the scope. The ones this cut passes through are drawn
+  // solid, the rest in amber - Steve, 2026-09-27: "one source and step for picking rather than
+  // mulitple steps and confusing overlays at random times."
+  const columns = useMemo(() => sec?.columns ?? [], [sec]);
+  const cutHere = useMemo(() => columns.filter((c) => c.cut), [columns]);
+  const others = useMemo(() => sec?.parts ?? [], [sec]);
 
   const geom = useMemo(() => {
     const ex = sec?.extent ?? { x: [0, 1] as [number, number], y: [0, 1] as [number, number],
@@ -230,10 +228,13 @@ export function GridSetup({ modelId, prefix }: { modelId: string; prefix: string
             back to {Math.round(sec.auto_z).toLocaleString()}</button>
         )}
         <span className="text-slate-500">
-          cuts <b>{sec.columns_cut}</b> columns{sec.columns_in_model > sec.columns_cut
-            ? ` (the model has ${sec.columns_in_model}, at every storey)` : ""}
+          cuts <b>{sec.columns_cut}</b> of <b>{sec.columns_in_model}</b> columns; the rest stand
+          elsewhere in the height and are drawn in amber
         </span>
         <div className="ml-auto flex gap-2">
+          <button onClick={() => { setPicked(new Set(cutHere.map((c) => c.id))); setNamed(null); }}
+                  className="rounded border border-slate-300 bg-white px-2 py-1 text-xs">
+            Pick the {cutHere.length} cut here</button>
           <button onClick={() => { setPicked(new Set(columns.map((c) => c.id))); setNamed(null); }}
                   className="rounded border border-slate-300 bg-white px-2 py-1 text-xs">
             Pick all {columns.length}</button>
@@ -280,21 +281,6 @@ export function GridSetup({ modelId, prefix }: { modelId: string; prefix: string
                   textAnchor="middle" fontSize={9} fill="#0f172a">{l.label}</text>
           </g>
         )))}
-        {fit && (["x", "y"] as const).map((axis) => fit.candidates[axis]
-          .filter((c) => !ignored.has(`${axis}${c.position}`) && !hasLine(axis, c.position))
-          .map((c) => (
-            <g key={`cand${axis}${c.position}`}>
-              {axis === "x"
-                ? <line x1={geom.X(c.position)} x2={geom.X(c.position)} y1={PAD - 16}
-                        y2={geom.H - PAD + 16} stroke="#d97706" strokeDasharray="3 4" />
-                : <line y1={geom.Y(c.position)} y2={geom.Y(c.position)} x1={PAD - 16}
-                        x2={W - PAD + 16} stroke="#d97706" strokeDasharray="3 4" />}
-              {c.at.map(([x, y], n) => (
-                <rect key={n} x={geom.X(x) - 5} y={geom.Y(y) - 5} width={10} height={10}
-                      fill="none" stroke="#d97706" strokeWidth={2} />
-              ))}
-            </g>
-          )))}
         {columns.map((c) => {
           const on = picked.has(c.id);
           const isOrigin = origin === c.id;
@@ -306,9 +292,13 @@ export function GridSetup({ modelId, prefix }: { modelId: string; prefix: string
                className="cursor-pointer">
               <rect x={geom.X((c.x1 + c.x2) / 2) - w / 2} y={geom.Y((c.y1 + c.y2) / 2) - h / 2}
                     width={w} height={h} rx={1}
-                    fill={isOrigin ? "#b91c1c" : on ? "#0f172a" : "#cbd5e1"}
-                    stroke={isOrigin ? "#7f1d1d" : "none"} strokeWidth={2} />
-              <title>{[c.designation, on ? "picked" : "not picked",
+                    fill={isOrigin ? "#b91c1c" : on ? "#0f172a" : c.cut ? "#cbd5e1" : "none"}
+                    stroke={isOrigin ? "#7f1d1d" : c.cut ? "none" : "#d97706"}
+                    strokeWidth={2} />
+              <title>{[c.designation,
+                       c.cut ? `cut here` : `stands ${Math.round(c.z0).toLocaleString()} to ` +
+                               `${Math.round(c.z1).toLocaleString()}`,
+                       on ? "picked" : "not picked",
                        isOrigin ? "A1" : ""].filter(Boolean).join(" · ")}</title>
               {isOrigin && (
                 <text x={geom.X((c.x1 + c.x2) / 2) + w} y={geom.Y((c.y1 + c.y2) / 2) - h}
@@ -329,7 +319,8 @@ export function GridSetup({ modelId, prefix }: { modelId: string; prefix: string
           {mode === "a1"
             ? "Click the column that is A1."
             : "Click a column to pick it or drop it; drag a box over a row to take several. " +
-              "Ctrl-drag takes them back out, and ctrl-click sets A1."}
+              "Ctrl-drag takes them back out, and ctrl-click sets A1. Amber columns stand " +
+              "elsewhere in the height and pick exactly the same way."}
         </span>
         <label className="ml-auto flex items-center gap-1">
           letters run
@@ -349,68 +340,14 @@ export function GridSetup({ modelId, prefix }: { modelId: string; prefix: string
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
           <div>
             <b>{fit.adopted}</b> of the model&apos;s {fit.columns_total} columns stand on this
-            grid — including the ones at other levels, which are in without being picked.
+            grid — including every one at another level that lines up, without being picked.
           </div>
-          {fit.unplaced > 0 && (
-            <div className="mt-2">
-              <b>{fit.unplaced}</b> stand on nothing. They would need the lines below — a sub-grid
-              line each, so nothing already named changes. They are ringed in amber on the drawing.
-              <div className="mt-2 flex flex-wrap gap-2">
-                {(["x", "y"] as const).flatMap((axis) => fit.candidates[axis].map((c) => {
-                  const key = `${axis}${c.position}`;
-                  const added = hasLine(axis, c.position);
-                  const left = ignored.has(key);
-                  return (
-                    <span key={key}
-                          className={`flex items-center gap-2 rounded border px-2 py-1 ${
-                            added ? "border-emerald-300 bg-emerald-50"
-                            : left ? "border-slate-200 bg-white text-slate-400"
-                            : "border-amber-300 bg-amber-50"}`}>
-                      <span className="tabular-nums">
-                        {axis.toUpperCase()} = {Math.round(c.position).toLocaleString()}
-                      </span>
-                      <span className="text-xs text-slate-500">
-                        {c.columns} column{c.columns === 1 ? "" : "s"}
-                      </span>
-                      {added ? (
-                        <button onClick={() => void changeLines({
-                                  remove: [{ axis, position: c.position }] })}
-                                disabled={busy}
-                                className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs">
-                          take it out again</button>
-                      ) : left ? (
-                        <button onClick={() => setIgnored((cur) => {
-                                  const next = new Set(cur); next.delete(key); return next; })}
-                                className="text-xs text-sky-700 hover:underline">bring back</button>
-                      ) : (
-                        <>
-                          <button onClick={() => void changeLines({
-                                    add: [{ axis, position: c.position, columns: c.columns }] })}
-                                  disabled={busy}
-                                  className="rounded bg-slate-900 px-2 py-0.5 text-xs text-white">
-                            add</button>
-                          <button onClick={() => setIgnored((cur) => new Set([...cur, key]))}
-                                  className="text-xs text-slate-500 hover:underline">leave</button>
-                        </>
-                      )}
-                    </span>
-                  );
-                }))}
-              </div>
-              {(fit.candidates.x.length + fit.candidates.y.length) > 1 && (
-                <button
-                  onClick={() => void changeLines({ add:
-                    (["x", "y"] as const).flatMap((axis) => fit.candidates[axis]
-                      .filter((c) => !ignored.has(`${axis}${c.position}`)
-                                     && !hasLine(axis, c.position))
-                      .map((c) => ({ axis, position: c.position, columns: c.columns }))) })}
-                  disabled={busy}
-                  className="mt-2 rounded border border-slate-300 bg-white px-2 py-1 text-xs">
-                  Add all the rest</button>
-              )}
+          {fit.unplaced > 0 ? (
+            <div className="mt-1 text-slate-700">
+              <b>{fit.unplaced}</b> stand on nothing. They are the amber ones with no mark: pick
+              any you want a line for and make the grid again.
             </div>
-          )}
-          {fit.unplaced === 0 && (
+          ) : (
             <div className="mt-1 text-emerald-800">Every column in the model is on the grid.</div>
           )}
         </div>
