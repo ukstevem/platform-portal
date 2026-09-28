@@ -54,7 +54,10 @@ type Scope = {
   joints: { weld: number; bolt: number; contact: number; crossing: number; excluded: number };
   rules: { id: number; rule: "never_weld" | "site" | "shop"; kind_a: string; kind_b: string }[];
   summary: { piece_types: number; pieces: number; single_part_pieces: number; largest: number;
-             mass_kg: number; mass_complete: boolean };
+             mass_kg: number; mass_complete: boolean;
+             /** How much of the list is actually a decision (bd 8mmf). */
+             assembly_types?: number; loose_types?: number; loose_pieces?: number;
+             loose_mass_kg?: number };
   pieces: Piece[];
 };
 
@@ -69,7 +72,13 @@ export function Isolation({ modelId, prefix, view }: {
   const [sel, setSel] = useState<Piece | null>(null);
   const [q, setQ] = useState("");
   const [supply, setSupply] = useState<Supply>("all");
-  const [singles, setSingles] = useState(true);
+  /**
+   * Loose parts are OUT of the list to begin with (bd 8mmf). On job 10335 that is 493 of 1,268
+   * kinds - 2,219 pieces, 92.7 t - with no assembly decision in any of them: they are material to
+   * buy and cut, they stay in the BOM and the material list untouched, and all they were doing
+   * here was making the list of things to decide 57% longer than it is.
+   */
+  const [singles, setSingles] = useState(false);
   const [shown, setShown] = useState(PAGE);
   const [picsMissing, setPicsMissing] = useState(false);
   const [picsVersion, setPicsVersion] = useState(0);
@@ -281,10 +290,13 @@ export function Isolation({ modelId, prefix, view }: {
                 {k === "all" ? "All" : k === "make" ? "Made" : k === "buy" ? "Bought" : "Mixed"}
               </button>
             ))}
-            <label className="ml-1 flex items-center gap-1.5 text-xs text-slate-600">
+            <label className="ml-1 flex items-center gap-1.5 text-xs text-slate-600"
+                   title="A piece of one part has no assembly decision in it. They stay in the BOM
+                          and the material list either way.">
               <input type="checkbox" checked={singles}
                      onChange={(e) => { setSingles(e.target.checked); setShown(PAGE); }} />
-              single parts ({s.single_part_pieces.toLocaleString()})
+              also show {(s.loose_types ?? 0).toLocaleString()} kinds of loose part
+              {s.loose_mass_kg ? ` (${(s.loose_mass_kg / 1000).toFixed(1)} t)` : ""}
             </label>
             <span className="ml-auto text-xs text-slate-500">
               {pieces.length.toLocaleString()} kinds · heaviest first
