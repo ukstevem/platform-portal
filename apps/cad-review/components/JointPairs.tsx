@@ -29,6 +29,12 @@ type Row = {
 type Pairs = {
   pairs_seen: number; contradictory: number; welds: number; welds_in_doubt: number; rows: Row[];
 };
+/** One real joint of the pair, with what the model records for it. */
+type Example = {
+  a: string; b: string; kind: string; bolts: number | null; weld_mm: number | null;
+  a_name: string; b_name: string; a_mark: string | null; b_mark: string | null;
+  pic?: string;
+};
 type Effect = {
   kind_a: string; kind_b: string; rule: string;
   before: { pieces: number; largest: number; over_30: number };
@@ -61,6 +67,8 @@ export function JointPairs({ modelId, prefix, onChanged }: {
   const pics = useRef<Map<string, string | "none" | "unprepared">>(new Map());
   const [shot, setShot] = useState<{ where?: string; loose?: string; state: string }>(
     { state: "drawing" });
+  const [examples, setExamples] = useState<Example[] | null>(null);
+  const [inBuilding, setInBuilding] = useState(false);
 
   const api = `/cad-review/api/cad/models/${modelId}`;
   const qs = `prefix=${encodeURIComponent(prefix)}`;
@@ -129,9 +137,43 @@ export function JointPairs({ modelId, prefix, onChanged }: {
     return got;
   }, [api, qs]);
 
+  /**
+   * THE JOINTS THEMSELVES. Steve, 2026-09-28, looking at the whole building with 271 joints lit
+   * up: "i dont understand what i am looking at? i just dont get what we are trying to convey?"
+   * The building says where the pair is; it cannot say what one LOOKS like, and "welded or
+   * bolted" is a question about what it looks like - the cleat, the channel, and whether there
+   * are holes through it.
+   */
+  useEffect(() => {
+    let live = true;
+    if (!row) { setExamples(null); return; }
+    setExamples(null);
+    (async () => {
+      const res = await fetch(`${api}/isolate/joint-pairs/examples/?${qs}`
+        + `&kind_a=${encodeURIComponent(row.kind_a)}&kind_b=${encodeURIComponent(row.kind_b)}`
+        + `&n=3`, { cache: "no-store" });
+      if (!res.ok || !live) return;
+      const body = await res.json();
+      const got: Example[] = body.examples ?? [];
+      setExamples(got);
+      for (const x of got) {                 // each close-up as it arrives, so the first shows fast
+        const pic = await fetch(`${api}/isolate/joint-pairs/close-up/?${qs}`
+          + `&a=${encodeURIComponent(x.a)}&b=${encodeURIComponent(x.b)}`);
+        if (!live) return;
+        if (pic.ok && pic.status !== 204) {
+          const url = URL.createObjectURL(await pic.blob());
+          setExamples((cur) => (cur ?? []).map((y) => y.a === x.a && y.b === x.b
+            ? { ...y, pic: url } : y));
+        }
+      }
+    })();
+    return () => { live = false; };
+  }, [row, api, qs]);
+
   useEffect(() => {
     let live = true;
     if (!row) { setShot({ state: "none" }); return; }
+    if (!inBuilding) return;
     setShot({ state: "drawing" });
     (async () => {
       const where = await picture(row, "where", rule);
@@ -145,7 +187,7 @@ export function JointPairs({ modelId, prefix, onChanged }: {
       if (next) void picture(next, "where", rule);
     })();
     return () => { live = false; };
-  }, [row, rows, at, rule, picture]);
+  }, [row, rows, at, rule, picture, inBuilding]);
 
   useEffect(() => {
     let live = true;
@@ -246,36 +288,77 @@ export function JointPairs({ modelId, prefix, onChanged }: {
             </span>
           </div>
 
-          <div className="mt-3 flex flex-wrap gap-4">
-            <figure className="space-y-1">
-              <figcaption className="text-xs uppercase tracking-wide text-slate-500">
-                Where this pair is
-              </figcaption>
-              <div className="flex h-[380px] w-[560px] items-center justify-center rounded border border-slate-200 bg-white">
-                {shot.where
-                  // eslint-disable-next-line @next/next/no-img-element
-                  ? <img src={shot.where} alt="where this pair is" width={560} height={380} />
-                  : <span className="text-sm text-slate-500">
-                      {shot.state === "unprepared"
-                        ? "The model's surfaces are not prepared yet — prepare the pictures on the Pieces tab."
-                        : shot.state === "drawing" ? "Drawing…" : "Nothing to draw."}
-                    </span>}
-              </div>
-            </figure>
-            <figure className="space-y-1">
-              <figcaption className="text-xs uppercase tracking-wide text-slate-500">
-                What comes loose if {rule === "site" ? "made on site" : "made in the shop"}
-              </figcaption>
-              <div className="flex h-[380px] w-[560px] items-center justify-center rounded border border-slate-200 bg-white">
-                {shot.loose
-                  // eslint-disable-next-line @next/next/no-img-element
-                  ? <img src={shot.loose} alt="what comes loose" width={560} height={380} />
-                  : <span className="text-sm text-slate-500">
-                      {shot.state === "drawing" ? "Working it out…" : "Nothing comes loose."}
-                    </span>}
-              </div>
-            </figure>
+          <p className="mt-3 text-sm text-slate-600">
+            Is a joint like this made <b>in the shop</b>, so the two arrive as one piece — or{" "}
+            <b>on site</b>, so they are made, delivered and erected separately? Here are three of
+            them from across the job, with what the model records for each:
+          </p>
+
+          <div className="mt-2 flex flex-wrap gap-4">
+            {(examples ?? [null, null, null]).map((x, n) => (
+              <figure key={x ? `${x.a}|${x.b}` : n} className="space-y-1">
+                <div className="flex h-[340px] w-[460px] items-center justify-center rounded border border-slate-200 bg-white">
+                  {x?.pic
+                    // eslint-disable-next-line @next/next/no-img-element
+                    ? <img src={x.pic} alt="a joint of this pair" width={460} height={340} />
+                    : <span className="text-sm text-slate-500">
+                        {x ? "Drawing…" : "Finding one…"}</span>}
+                </div>
+                <figcaption className="text-xs">
+                  {x ? (
+                    <>
+                      <span className={`rounded px-1.5 py-0.5 ${x.kind === "bolt"
+                        ? "bg-amber-100 text-amber-900" : "bg-sky-100 text-sky-900"}`}>
+                        recorded as {x.kind === "bolt" ? "bolted" : "welded"}
+                      </span>
+                      <span className="ml-2 text-slate-500">
+                        {x.kind === "bolt"
+                          ? `${x.bolts ?? "?"} bolt${x.bolts === 1 ? "" : "s"}`
+                          : `${Math.round(x.weld_mm ?? 0)} mm of weld`}
+                        {x.a_mark || x.b_mark
+                          ? ` · ${[x.a_mark, x.b_mark].filter(Boolean).join(" + ")}` : ""}
+                      </span>
+                    </>
+                  ) : <span className="text-slate-400">&nbsp;</span>}
+                </figcaption>
+              </figure>
+            ))}
           </div>
+
+          <button onClick={() => setInBuilding((v) => !v)}
+                  className="mt-2 text-xs text-sky-700 hover:underline">
+            {inBuilding ? "hide the building" : "show me where these are in the building"}
+          </button>
+          {inBuilding && (
+            <div className="mt-2 flex flex-wrap gap-4">
+              <figure className="space-y-1">
+                <figcaption className="text-xs uppercase tracking-wide text-slate-500">
+                  Where this pair is
+                </figcaption>
+                <div className="flex h-[380px] w-[560px] items-center justify-center rounded border border-slate-200 bg-white">
+                  {shot.where
+                    // eslint-disable-next-line @next/next/no-img-element
+                    ? <img src={shot.where} alt="where this pair is" width={560} height={380} />
+                    : <span className="text-sm text-slate-500">
+                        {shot.state === "unprepared"
+                          ? "The model's surfaces are not prepared yet — prepare the pictures on the Pieces tab."
+                          : "Drawing…"}
+                      </span>}
+                </div>
+              </figure>
+              <figure className="space-y-1">
+                <figcaption className="text-xs uppercase tracking-wide text-slate-500">
+                  What comes loose if {rule === "site" ? "made on site" : "made in the shop"}
+                </figcaption>
+                <div className="flex h-[380px] w-[560px] items-center justify-center rounded border border-slate-200 bg-white">
+                  {shot.loose
+                    // eslint-disable-next-line @next/next/no-img-element
+                    ? <img src={shot.loose} alt="what comes loose" width={560} height={380} />
+                    : <span className="text-sm text-slate-500">Working it out…</span>}
+                </div>
+              </figure>
+            </div>
+          )}
 
           <div className="mt-3 rounded bg-slate-50 p-3 text-sm">
             {!effect ? <span className="text-slate-500">Working out what it would do…</span> : (
