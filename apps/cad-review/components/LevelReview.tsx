@@ -21,7 +21,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 type Level = { elevation: number; name: string; steel_m: number | null; members: number;
                source: string };
 type Layout = { levels: Level[]; grids: { x: unknown[]; y: unknown[] }; saved: boolean;
-                naming: { letters: "x" | "y"; flip_x: boolean; flip_y: boolean } };
+                naming: { letters: "x" | "y"; flip_x: boolean; flip_y: boolean };
+                /** The renderer's version, for the picture URLs (bd ns4z). */
+                render?: string };
 
 export function LevelReview({ modelId, prefix }: { modelId: string; prefix: string }) {
   const [lay, setLay] = useState<Layout | null>(null);
@@ -60,19 +62,23 @@ export function LevelReview({ modelId, prefix }: { modelId: string; prefix: stri
     return () => { live = false; };
   }, [api, qs]);
 
-  const levels = lay?.levels ?? [];
+  // Memoised: a bare `lay?.levels ?? []` is a new array on every render, and every effect that
+  // depends on it then re-runs on every render (bd ns4z - that is an infinite loop in JointPairs).
+  const levels = useMemo(() => lay?.levels ?? [], [lay]);
   const level = levels[at];
+  const render = lay?.render ?? "";
 
   const draw = useCallback(async (elevation: number): Promise<string | "none" | "unprepared"> => {
     const had = cache.current.get(elevation);
     if (had) return had;
-    const res = await fetch(`${api}/layout/level-thumbnail/?${qs}&elevation=${elevation}`);
+    const res = await fetch(`${api}/layout/level-thumbnail/?${qs}&elevation=${elevation}`
+      + `&r=${encodeURIComponent(render)}`);
     if (res.status === 202) return "unprepared";
     if (res.status === 204 || !res.ok) return "none";
     const url = URL.createObjectURL(await res.blob());
     cache.current.set(elevation, url);
     return url;
-  }, [api, qs]);
+  }, [api, qs, render]);
 
   useEffect(() => {
     let live = true;

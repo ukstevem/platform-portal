@@ -68,6 +68,10 @@ export function JointPairs({ modelId, prefix, onChanged }: {
   const [shot, setShot] = useState<{ where?: string; loose?: string; state: string }>(
     { state: "drawing" });
   const [examples, setExamples] = useState<Example[] | null>(null);
+  /** The renderer's version, which goes in every picture URL. A browser holding a picture from
+   *  before the caching was fixed will not ask about it again - it was sent "immutable, one year"
+   *  - so the only way to reach it is a URL it has never seen. */
+  const [render, setRender] = useState("");
   const [inBuilding, setInBuilding] = useState(false);
 
   const api = `/cad-review/api/cad/models/${modelId}`;
@@ -97,7 +101,11 @@ export function JointPairs({ modelId, prefix, onChanged }: {
     return () => { live = false; };
   }, [api, qs, reload, why]);
 
-  const rows = pairs?.rows ?? [];
+  // MEMOISED, and it matters: as a bare `pairs?.rows ?? []` this is a new array on every
+  // render, so every effect that depends on it re-runs on every render. With a setState in the
+  // guard below that is an infinite loop - "Maximum update depth exceeded", and the page never
+  // settles long enough to show anything (Steve, 2026-09-29: "its not updating in a hard reload").
+  const rows = useMemo(() => pairs?.rows ?? [], [pairs]);
   const row = rows[at];
   const settled = rows.filter((r) => r.rule).length;
   const todo = useMemo(
@@ -114,7 +122,7 @@ export function JointPairs({ modelId, prefix, onChanged }: {
     const body: Effect = await res.json();
     cache.current.set(k, body);
     return body;
-  }, [api, qs, why]);
+  }, [api, qs, why, render]);
 
   /**
    * The pair drawn IN THE BUILDING. Steve, 2026-09-27, after two attempts in words and numbers:
@@ -128,7 +136,7 @@ export function JointPairs({ modelId, prefix, onChanged }: {
     if (had) return had;
     const res = await fetch(`${api}/isolate/joint-pairs/picture/?${qs}`
       + `&kind_a=${encodeURIComponent(r.kind_a)}&kind_b=${encodeURIComponent(r.kind_b)}`
-      + `&what=${what}&rule=${want}`);
+      + `&what=${what}&rule=${want}&r=${encodeURIComponent(render)}`);
     let got: string | "none" | "unprepared";
     if (res.status === 202) got = "unprepared";
     else if (res.status === 204 || !res.ok) got = "none";
@@ -155,10 +163,13 @@ export function JointPairs({ modelId, prefix, onChanged }: {
       if (!res.ok || !live) return;
       const body = await res.json();
       const got: Example[] = body.examples ?? [];
+      const r: string = body.render ?? "";
+      setRender(r);
       setExamples(got);
       for (const x of got) {                 // each close-up as it arrives, so the first shows fast
         const pic = await fetch(`${api}/isolate/joint-pairs/close-up/?${qs}`
-          + `&a=${encodeURIComponent(x.a)}&b=${encodeURIComponent(x.b)}`);
+          + `&a=${encodeURIComponent(x.a)}&b=${encodeURIComponent(x.b)}`
+          + `&r=${encodeURIComponent(r)}`);
         if (!live) return;
         if (pic.ok && pic.status !== 204) {
           const url = URL.createObjectURL(await pic.blob());
@@ -172,7 +183,9 @@ export function JointPairs({ modelId, prefix, onChanged }: {
 
   useEffect(() => {
     let live = true;
-    if (!row) { setShot({ state: "none" }); return; }
+    // Idempotent: setting a NEW object every time is a state change every time, which is the
+    // other half of the loop. Say nothing if there is nothing new to say.
+    if (!row) { setShot((cur) => cur.state === "none" ? cur : { state: "none" }); return; }
     if (!inBuilding) return;
     setShot({ state: "drawing" });
     (async () => {
