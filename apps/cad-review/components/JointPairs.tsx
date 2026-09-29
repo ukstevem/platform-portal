@@ -291,7 +291,13 @@ export function JointPairs({ modelId, prefix, onChanged }: {
           <p className="mt-3 text-sm text-slate-600">
             Is a joint like this made <b>in the shop</b>, so the two arrive as one piece — or{" "}
             <b>on site</b>, so they are made, delivered and erected separately? Here are three of
-            them from across the job, with what the model records for each:
+            them from across the job, with what the model records for each.
+          </p>
+          <p className="text-xs text-slate-500">
+            The <span className="font-medium text-sky-800">{row.kind_a}</span> and the{" "}
+            <span className="font-medium text-amber-800">{row.kind_b}</span> are drawn in their own
+            colours and <b>pulled slightly apart</b>, so you can see the faces that meet and any
+            holes through them. Everything around is ghosted.
           </p>
 
           <div className="mt-2 flex flex-wrap gap-4">
