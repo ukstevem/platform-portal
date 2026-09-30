@@ -45,6 +45,9 @@ type Scope = {
   prefix: string; name: string | null;
   /** The node a floor at a time, and which floor is being looked at (bd s8r8.5). */
   levels?: LevelRow[]; level?: string | null;
+  /** Whether a person has SETTLED the grid and the levels. Not inferred from an empty list:
+   *  a model with no levels looks the same, and the two mean opposite things (bd s8r8). */
+  layout?: { saved: boolean; levels: number; grids: number };
   breadcrumbs: { prefix: string; name: string | null }[];
   parts: number;
   detection: { revision: number; label: string | null; created_at: string;
@@ -85,12 +88,23 @@ export function Isolation({ modelId, prefix, view }: {
   const onPicsMissing = useCallback(() => setPicsMissing(true), []);
   const [reload, setReload] = useState(0);
   const [level, setLevel] = useState("");
+  // THE GROUND FIRST. Steve, 2026-09-30: "the view jumps straight to the parts, and should be
+  // looking at grids and levels before any other tabs are populated." An explicit ?view= still
+  // wins - a link somebody sent is a deliberate destination - but the bare page opens on Grid and
+  // moves on only once the layout is settled, which the scope now states rather than implying
+  // through an empty list.
   const [tab, setTab] = useState<"grid" | "levels" | "joints" | "pieces" | "bom">(
     view === "bom" ? "bom" : view === "grid" ? "grid"
       : view === "levels" || view === "layout" ? "levels"
-      : view === "joints" ? "joints" : "pieces");
+      : view === "joints" ? "joints"
+      : view === "pieces" ? "pieces" : "grid");
   const [accepting, setAccepting] = useState(false);
   const [acceptNote, setAcceptNote] = useState<string | null>(null);
+
+  // Held rather than hidden: until the grid and the levels are settled, the steps that read an
+  // address off them are shown but closed. `false` only once the scope has actually loaded -
+  // greying the tabs while it is still fetching would flash the warning at every navigation.
+  const layoutReady = scope ? (scope.layout?.saved ?? true) : true;
 
   const api = `/cad-review/api/cad/models/${modelId}`;
   const qs = `prefix=${encodeURIComponent(prefix)}`;
@@ -247,15 +261,32 @@ export function Isolation({ modelId, prefix, view }: {
           and levels, one by one, the drawings are too busy"). One drawing, one question. */}
       <div className="flex gap-1 border-b border-slate-200">
         {([["grid", "1 · Grid"], ["levels", "2 · Levels"], ["joints", "3 · Joints"],
-           ["pieces", "Pieces"], ["bom", "Bill of materials"]] as const).map(([k, label]) => (
-          <button key={k} onClick={() => setTab(k)}
-                  className={`-mb-px border-b-2 px-4 py-2 text-sm ${tab === k
-                    ? "border-slate-900 font-medium text-slate-900"
-                    : "border-transparent text-slate-500 hover:text-slate-800"}`}>
-            {label}
-          </button>
-        ))}
+           ["pieces", "Pieces"], ["bom", "Bill of materials"]] as const).map(([k, label]) => {
+          // Everything after the grid and the levels READS an address off them - which level a
+          // piece sits at, which grid line a column is on - so offering those tabs first invites
+          // work that has to be done again. Held, not hidden: a disabled tab says the step exists
+          // and what it is waiting for, where a missing one says nothing at all.
+          const held = !layoutReady && (k === "joints" || k === "pieces" || k === "bom");
+          return (
+            <button key={k} disabled={held} onClick={() => !held && setTab(k)}
+                    title={held ? "Set the grid and confirm the levels first" : undefined}
+                    className={`-mb-px border-b-2 px-4 py-2 text-sm ${
+                      held ? "cursor-not-allowed border-transparent text-slate-300"
+                      : tab === k ? "border-slate-900 font-medium text-slate-900"
+                      : "border-transparent text-slate-500 hover:text-slate-800"}`}>
+              {label}
+            </button>
+          );
+        })}
       </div>
+
+      {!layoutReady && (
+        <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <strong>Set the grid, then confirm the levels.</strong> Everything after them is written
+          against them — which level a piece sits at, which grid line a column is on — so the later
+          steps stay closed until the ground is settled.
+        </p>
+      )}
 
       {tab === "pieces" && (scope.levels?.length ?? 0) > 1 && (
         <div className="space-y-1">
