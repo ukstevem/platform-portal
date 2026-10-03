@@ -14,6 +14,12 @@ export type PartLine = {
   key: string; mark: string | null; designation: string | null; name: string;
   class: string | null; supply: Supply; length_mm: number | null; mass_each_kg: number | null;
   cut_file: "nc1" | "dxf" | null; qty: number; mass_total_kg?: number;
+  /** Whether this line's joints are counted in the weld and bolt take-off (bd 1xlf), and how
+   *  they were detected. A line with welds and NO bolts is one the detailer has not drilled -
+   *  on job 10335 that split 242 purlin lines into 188 drilled and 54 not, with nothing
+   *  ambiguous between them. */
+  joint_take_off?: "include" | "exclude";
+  joints?: { welds: number; bolts: number; contacts: number };
 };
 export type AssemblyLine = {
   key: string; label: string; name: string | null; accepted: boolean; qty: number;
@@ -131,6 +137,74 @@ export function AssemblyList({ rows, modelId, picPrefix }: {
   );
 }
 
+/**
+ * The fastener column (bd 1xlf). Steve, 2026-10-03: "we need a way to exclude/include
+ * fasteners/welds at BOM levels ... we could then simply select ignore/exclude in a factener
+ * column to remove it from the joints."
+ *
+ * Job 10335's purlins meet their cleats flush with NO holes in either part, so every joint reads
+ * as a weld - which is all the model can say, and wrong about the building. This is how a person
+ * says so without anybody pretending the geometry changed.
+ *
+ * It changes the TAKE-OFF ONLY. The joints stay detected and the pieces do not move, so the figures
+ * beside it report what was DETECTED rather than what is now charged - otherwise excluding a line
+ * would erase the very evidence that says whether excluding it was right.
+ *
+ * The figures are stated and NOT interpreted. "Welds and no bolts" means an undrilled purlin only
+ * if you already know the member ought to be bolted; on a fin plate it is simply correct. Measured
+ * within the C200 purlins that rule separated 188 drilled lines from 54 undrilled with nothing
+ * between them - and applied to the whole BOM it flags 563 lines, most of them welded plates that
+ * are right as they stand. The correlation was real and the generalisation was not.
+ */
+function Fastener({ modelId, p }: { modelId: string; p: PartLine }) {
+  const [value, setValue] = useState<"include" | "exclude">(p.joint_take_off ?? "include");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const j = p.joints;
+
+  async function set(next: "include" | "exclude") {
+    const was = value;
+    setBusy(true); setErr(null); setValue(next);               // optimistic
+    try {
+      const res = await fetch(
+        `/cad-review/api/cad/models/${modelId}/isolate/take-off/${p.key}/`,
+        { method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ take_off: next === "include" ? null : "exclude" }) });
+      if (!res.ok) { setValue(was); setErr(`${res.status}`); }
+    } catch {
+      setValue(was); setErr("failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!j || (j.welds === 0 && j.bolts === 0 && j.contacts === 0)) {
+    return <span className="text-slate-300">—</span>;          // no joints: nothing to answer
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+      <button
+        type="button" disabled={busy}
+        onClick={() => set(value === "exclude" ? "include" : "exclude")}
+        title={value === "exclude"
+          ? "Left out of the weld and bolt take-off. The joints are still detected and the pieces are unchanged."
+          : "Counted in the take-off. Click to leave this line's joints out."}
+        className={`rounded px-1.5 py-0.5 text-[11px] ring-1 ${
+          value === "exclude"
+            ? "bg-amber-50 text-amber-800 ring-amber-300"
+            : "bg-white text-slate-600 ring-slate-300 hover:bg-slate-50"}`}>
+        {value === "exclude" ? "excluded" : "counted"}
+      </button>
+      <span className="text-[11px] tabular-nums text-slate-400"
+            title={`detected: ${j.welds} weld${j.welds === 1 ? "" : "s"}, ${j.bolts} bolt${
+              j.bolts === 1 ? "" : "s"}, ${j.contacts} contact${j.contacts === 1 ? "" : "s"}`}>
+        {j.welds}w/{j.bolts}b
+      </span>
+      {err && <span className="text-[11px] text-rose-600">{err}</span>}
+    </span>
+  );
+}
+
 function PartsTable({ rows, modelId, perPiece }: {
   rows: PartLine[]; modelId: string; perPiece: number;
 }) {
@@ -146,6 +220,7 @@ function PartsTable({ rows, modelId, perPiece }: {
           <th className="py-1 text-right font-medium">kg each</th>
           <th className="py-1 text-left font-medium pl-3">Supply</th>
           <th className="py-1 text-left font-medium">Cut file</th>
+          <th className="py-1 text-left font-medium pl-3">Fastener</th>
         </tr>
       </thead>
       <tbody className="divide-y divide-slate-100">
@@ -159,6 +234,7 @@ function PartsTable({ rows, modelId, perPiece }: {
             <td className="py-1 text-right tabular-nums">{p.mass_each_kg ?? "?"}</td>
             <td className="py-1 pl-3"><SupplyPill s={p.supply} /></td>
             <td className="py-1"><CutFile modelId={modelId} p={p} /></td>
+            <td className="py-1 pl-3"><Fastener modelId={modelId} p={p} /></td>
           </tr>
         ))}
       </tbody>
@@ -189,6 +265,7 @@ export function MaterialTable({ rows, modelId }: { rows: PartLine[]; modelId: st
               <th className="px-3 py-2 text-right font-medium">kg each</th>
               <th className="px-3 py-2 text-right font-medium">kg total</th>
               <th className="px-3 py-2 text-left font-medium">Cut file</th>
+              <th className="px-3 py-2 text-left font-medium">Fastener</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -204,6 +281,7 @@ export function MaterialTable({ rows, modelId }: { rows: PartLine[]; modelId: st
                 <td className="px-3 py-1.5 text-right tabular-nums">
                   {(m.mass_total_kg ?? 0).toLocaleString()}</td>
                 <td className="px-3 py-1.5"><CutFile modelId={modelId} p={m} /></td>
+                <td className="px-3 py-1.5"><Fastener modelId={modelId} p={m} /></td>
               </tr>
             ))}
           </tbody>
